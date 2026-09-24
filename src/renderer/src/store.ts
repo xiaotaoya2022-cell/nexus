@@ -24,10 +24,3 @@ export const useUi = create<UiState>((set) => ({
   setTheme: (theme) => set({ theme }),
   setSync: (sync) => set({ sync })
 }))
-
-export const RANGE_LABELS: Array<{ key: RangeKey; label: string }> = [
-  { key: 'today', label: '今日' },
-  { key: '7d', label: '近 7 天' },
-  { key: '30d', label: '近 30 天' },
-  { key: 'all', label: '全部' }
-]

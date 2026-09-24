@@ -101,7 +101,7 @@ export interface SyncProgress {
 }
 
 export interface Settings {
-  theme: 'dark' | 'light' | 'system'
+  theme: 'dark' | 'light'
 }
 
 export interface TimeRange {

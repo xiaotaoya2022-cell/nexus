@@ -103,6 +103,12 @@ export class SyncService {
     const cutoff = Date.now() - days * 86400_000
     this.store.db.prepare('DELETE FROM usage_records WHERE ts < ?').run(cutoff)
     this.store.db.prepare('DELETE FROM tool_calls WHERE ts IS NOT NULL AND ts < ?').run(cutoff)
+    // 会话元数据一并清理（蓝队 F3）；无时间戳的行保守保留
+    this.store.db
+      .prepare(
+        'DELETE FROM sessions WHERE COALESCE(updated_at, started_at, 0) > 0 AND COALESCE(updated_at, started_at, 0) < ?'
+      )
+      .run(cutoff)
     logger.info('store.cleanup', { retentionDays: days, cutoff })
   }
 

@@ -1,6 +1,6 @@
 # aggregator 模块
 
-> 最后更新：2026-09-25 01:27:57
+> 最后更新：2026-09-25 02:33:24
 
 ## 职责
 
@@ -24,6 +24,9 @@ Nexus 自有 SQLite 存储的 schema 与写入、适配器同步编排、看板�
 - 启动即同步一次，此后每 60s 轮询；`syncNow` 支持手动触发（重入保护）。
 - 逐适配器：loadSyncState → `adapter.sync(ctx)` → saveSyncState；单适配器失败不影响其余（错误记入 results 并广播）。
 - 每次状态变化通过 `broadcast` 推给渲染层（`nexus:sync-progress`）；窗口 `did-finish-load` 时补发当前状态，避免渲染端错过事件。
+- **保留策略**：settings 表 `retentionDays > 0` 时，每轮同步收尾清理超期的 usage_records / tool_calls / sessions；0 或未设 = 永久保留（默认）。
+- **增量防漏（红队 N-01）**：ZCode 行落库时刻晚于 started_at，纯时间游标会永久漏行；三个同步循环均带 24h 安全重叠窗 + store 层 dedupe_key upsert（重叠重读幂等补漏并刷新值）。
+- **外部库读取**：只读连接设 `PRAGMA busy_timeout=5000`，活动 WAL 写入下避免 SQLITE_BUSY。
 
 ### query-service.ts
 - 时间口径：库内 ts 为 epoch ms；日期分桶用 SQLite `localtime`（跟随本机时区），today 起点 = JS 本地零点，两者一致。
