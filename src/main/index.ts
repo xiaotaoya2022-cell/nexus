@@ -1,11 +1,16 @@
 // Nexus 主进程入口：创建窗口、装配各模块（依赖注入）、启动同步循环。
 
 import { app, BrowserWindow, nativeTheme } from 'electron'
+import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 import { NexusStore } from './modules/aggregator/infrastructure/store'
 import { createAdapters, PRESENCE_ONLY_AGENTS } from './modules/adapter/application/registry'
 import { SyncService } from './modules/aggregator/application/sync-service'
 import { QueryService } from './modules/aggregator/application/query-service'
+import { SystemCollector } from './modules/system/collector'
+import { ZcodeManager } from './modules/zcode/manager'
+import { DshBridge } from './modules/dsh/bridge'
+import { RemoteServer } from './modules/remote/server'
 import { registerIpc, broadcastSyncProgress } from './ipc/register'
 import { logger } from './modules/shared/logger'
 
@@ -141,7 +146,25 @@ app.whenReady()
   const query = new QueryService(store)
   sync = new SyncService(store, adapters, (p) => broadcastSyncProgress(mainWindow, p))
 
-  registerIpc({ store, query, sync, adapters, presence: PRESENCE_ONLY_AGENTS, getMainWindow: () => mainWindow })
+  // v2：系统采集 / 多开实例 / DSH 桥接 / 远程服务
+  const system = new SystemCollector()
+  const zcode = new ZcodeManager()
+  const dsh = new DshBridge()
+  let remoteSecret = store.getSetting('remoteSecret')
+  if (!remoteSecret) {
+    remoteSecret = randomBytes(32).toString('hex')
+    store.setSetting('remoteSecret', remoteSecret)
+  }
+  const remote = new RemoteServer(
+    { store, query, system, zcode, dsh, userDataDir: app.getPath('userData') },
+    remoteSecret
+  )
+
+  registerIpc({ store, query, sync, adapters, presence: PRESENCE_ONLY_AGENTS, system, zcode, dsh, remote, getMainWindow: () => mainWindow })
+
+  if (store.getSetting('remoteEnabled') === '1') {
+    remote.start()
+  }
 
   createWindow()
   sync.startBackgroundLoop()

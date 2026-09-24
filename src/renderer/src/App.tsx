@@ -9,6 +9,7 @@ import { useDashboard } from './useDashboard'
 import { EChart } from './charts/EChart'
 import { AgentSidebar } from './components/AgentSidebar'
 import { SessionsPanel } from './components/SessionsPanel'
+import { SystemCard } from './components/SystemCard'
 import {
   ChartCard,
   EmptyState,
@@ -52,6 +53,9 @@ export default function App(): JSX.Element {
   const [toast, setToast] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [retention, setRetention] = useState<number>(0)
+  const [remoteOn, setRemoteOn] = useState(false)
+  const [remoteStatus, setRemoteStatus] = useState<Awaited<ReturnType<typeof nexus.getRemoteStatus>> | null>(null)
+  const [pairing, setPairing] = useState<Awaited<ReturnType<typeof nexus.regeneratePairing>> | null>(null)
 
   // 启动时读取主题设置
   useEffect(() => {
@@ -109,7 +113,12 @@ export default function App(): JSX.Element {
   }
 
   const openSettings = async (): Promise<void> => {
-    if (!settingsOpen) setRetention(await nexus.getRetentionDays())
+    if (!settingsOpen) {
+      setRetention(await nexus.getRetentionDays())
+      const s = await nexus.getRemoteStatus()
+      setRemoteStatus(s)
+      setRemoteOn(s.enabled)
+    }
     setSettingsOpen((v) => !v)
   }
 
@@ -246,6 +255,70 @@ export default function App(): JSX.Element {
             >
               打开数据目录
             </button>
+
+            <div className="my-3 h-px bg-hairline" />
+            <div className="mb-1 text-ui-xs text-foreground-subtle">远程访问（局域网）</div>
+            <div className="flex items-center justify-between">
+              <span className="text-ui-sm text-foreground">{remoteOn ? '已开启' : '已关闭'}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  void nexus.setRemoteEnabled(!remoteOn).then(() =>
+                    nexus.getRemoteStatus().then((s) => {
+                      setRemoteStatus(s)
+                      setRemoteOn(s.enabled)
+                    })
+                  )
+                }}
+                className="h-7 rounded-lg bg-secondary px-2 text-ui-sm text-foreground transition-colors duration-150 hover:bg-surface-hover"
+              >
+                {remoteOn ? '关闭' : '开启'}
+              </button>
+            </div>
+            {remoteOn && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void nexus.regeneratePairing().then((p) => setPairing(p))
+                  }}
+                  className="mt-2 h-7 w-full rounded-lg bg-secondary px-2 text-ui-sm text-foreground transition-colors duration-150 hover:bg-surface-hover"
+                >
+                  生成配对二维码（60 秒有效）
+                </button>
+                {pairing?.qrDataUrl && (
+                  <div className="mt-2 flex flex-col items-center gap-1">
+                    <img src={pairing.qrDataUrl} alt="配对二维码" className="h-40 w-40 rounded-lg border border-border" />
+                    <span className="font-mono text-ui-sm tabular-nums text-foreground-subtle">
+                      PIN {pairing.pin}
+                    </span>
+                  </div>
+                )}
+                {remoteStatus && remoteStatus.devices.length > 0 && (
+                  <div className="mt-2">
+                    <div className="mb-1 text-ui-xs text-foreground-subtle">已配对设备</div>
+                    {remoteStatus.devices.map((d) => (
+                      <div key={d.deviceId} className="flex items-center justify-between py-0.5">
+                        <span className="truncate text-ui-caption text-foreground" title={d.deviceId}>
+                          {d.name}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void nexus.revokeDevice(d.deviceId).then(() =>
+                              nexus.getRemoteStatus().then(setRemoteStatus)
+                            )
+                          }}
+                          className="rounded-md px-1.5 py-0.5 text-ui-xs text-destructive transition-colors duration-150 hover:bg-destructive-surface"
+                        >
+                          撤销
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
             </div>
           </>
         )}
@@ -265,6 +338,9 @@ export default function App(): JSX.Element {
             />
           ) : (
             <>
+              {/* 系统状态 */}
+              <SystemCard />
+
               {/* KPI 矩阵 */}
               <div className="grid grid-cols-2 gap-4 2xl:grid-cols-4">
                 <KpiCard

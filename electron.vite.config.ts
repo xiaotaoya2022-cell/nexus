@@ -16,7 +16,8 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve(__dirname, 'src/main/index.ts'),
-          smoke: resolve(__dirname, 'src/main/smoke.ts')
+          smoke: resolve(__dirname, 'src/main/smoke.ts'),
+          'remote-smoke': resolve(__dirname, 'src/main/remote-smoke.ts')
         }
       }
     }

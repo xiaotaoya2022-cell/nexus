@@ -9,6 +9,10 @@ import type { NexusStore } from '../modules/aggregator/infrastructure/store'
 import type { AgentAdapter, PresenceOnlyAgent } from '../modules/adapter/domain/types'
 import { detectPresence } from '../modules/adapter/application/registry'
 import type { AgentInfo } from '@shared/types'
+import type { SystemCollector } from '../modules/system/collector'
+import type { ZcodeManager } from '../modules/zcode/manager'
+import type { DshBridge } from '../modules/dsh/bridge'
+import type { RemoteServer } from '../modules/remote/server'
 import { rangeStartMs } from '../modules/aggregator/application/query-service'
 
 const ACTIVE_WINDOW_MS = 15 * 60_000
@@ -20,6 +24,10 @@ export interface IpcDeps {
   sync: SyncService
   adapters: AgentAdapter[]
   presence: PresenceOnlyAgent[]
+  system: SystemCollector
+  zcode: ZcodeManager
+  dsh: DshBridge
+  remote: RemoteServer
   getMainWindow: () => BrowserWindow | null
 }
 
@@ -180,6 +188,24 @@ export function registerIpc(deps: IpcDeps): void {
     return normalized
   })
   ipcMain.handle('nexus:getDataDir', () => app.getPath('userData'))
+
+  // ── v2：系统状态 / 远程服务 ──
+  ipcMain.handle('nexus:getSystemSnapshot', async () => {
+    try {
+      return await deps.system.snapshot()
+    } catch {
+      return null
+    }
+  })
+  ipcMain.handle('nexus:getRemoteStatus', () => deps.remote.status())
+  ipcMain.handle('nexus:regeneratePairing', async () => deps.remote.regeneratePairing())
+  ipcMain.handle('nexus:setRemoteEnabled', (_e, enabled: boolean) => {
+    if (enabled === true) deps.remote.start()
+    else deps.remote.stop()
+  })
+  ipcMain.handle('nexus:revokeDevice', (_e, deviceId: string) => {
+    if (typeof deviceId === 'string' && deviceId.startsWith('dev_')) deps.remote.revokeDevice(deviceId)
+  })
 
   ipcMain.handle('nexus:exportBoard', async () => {
     const win = deps.getMainWindow()

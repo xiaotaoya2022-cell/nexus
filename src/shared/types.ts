@@ -129,6 +129,11 @@ export interface NexusApi {
   getRetentionDays(): Promise<number>
   setRetentionDays(days: number): Promise<number>
   getDataDir(): Promise<string>
+  getSystemSnapshot(): Promise<import('./protocol').SystemSnapshotLike | null>
+  getRemoteStatus(): Promise<import('./protocol').RemoteStatusInfo>
+  regeneratePairing(): Promise<import('./protocol').PairingInfo>
+  setRemoteEnabled(enabled: boolean): Promise<void>
+  revokeDevice(deviceId: string): Promise<void>
   exportBoard(): Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>
   openPath(path: string): Promise<void>
   onSyncProgress(cb: (p: SyncProgress) => void): () => void

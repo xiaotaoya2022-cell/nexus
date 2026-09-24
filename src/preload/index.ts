@@ -22,6 +22,11 @@ const api: NexusApi = {
   getRetentionDays: () => ipcRenderer.invoke('nexus:getRetentionDays'),
   setRetentionDays: (days: number) => ipcRenderer.invoke('nexus:setRetentionDays', days),
   getDataDir: () => ipcRenderer.invoke('nexus:getDataDir'),
+  getSystemSnapshot: () => ipcRenderer.invoke('nexus:getSystemSnapshot'),
+  getRemoteStatus: () => ipcRenderer.invoke('nexus:getRemoteStatus'),
+  regeneratePairing: () => ipcRenderer.invoke('nexus:regeneratePairing'),
+  setRemoteEnabled: (enabled: boolean) => ipcRenderer.invoke('nexus:setRemoteEnabled', enabled),
+  revokeDevice: (deviceId: string) => ipcRenderer.invoke('nexus:revokeDevice', deviceId),
   exportBoard: () => ipcRenderer.invoke('nexus:exportBoard'),
   openPath: (path) => ipcRenderer.invoke('nexus:openPath', path),
   onSyncProgress: (cb: (p: SyncProgress) => void) => {
