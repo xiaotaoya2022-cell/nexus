@@ -4,7 +4,10 @@
 // - 订阅缓存：断线重连鉴权成功后自动重发 subscribe
 // - 状态与推送经回调广播（store.ts 桥接到 zustand）
 
+import { sha256 } from 'js-sha256'
 import type {
+  AuthChallenge,
+  AuthVerifyRequest,
   PairRequest,
   PairResult,
   PushChannel,
@@ -121,19 +124,31 @@ export class NexusConnection {
     this.ws = ws
     ws.onopen = () => {
       this.setStatus('authing', '鉴权中')
-      void this.request('auth', { deviceId: this.deviceId, token: this.token }, 8_000)
+      // 两步挑战式鉴权（红蓝审计 P1-1）：token 永不上线，
+      // proof = sha256(token:challengeNonce)，挑战由 auth.hello 下发且单次有效。
+      void (async () => {
+        const hello = await this.request('auth.hello', { deviceId: this.deviceId }, 8_000)
+        const { nonce } = hello as AuthChallenge
+        const proof = sha256(`${this.token}:${nonce}`)
+        const verify: AuthVerifyRequest = { deviceId: this.deviceId, proof }
+        await this.request('auth.verify', verify, 8_000)
+      })()
         .then(() => {
           this.backoffIdx = 0
           this.setStatus('online', null)
           this.resubscribeAll()
         })
         .catch((err: Error) => {
-          if (err.message.includes('UNAUTHORIZED') || err.message.includes('鉴权')) {
+          if (
+            err.message.includes('UNAUTHORIZED') ||
+            err.message.includes('鉴权') ||
+            err.message.includes('配对')
+          ) {
             // 令牌失效（PC 端吊销/数据重置）：停止自动重连，等待用户重新配对
             this.manualClose = true
             this.teardownSocket()
             this.failAllPending('鉴权失败')
-            this.setStatus('error', '鉴权失败：请在 PC 端重新生成 PIN 配对')
+            this.setStatus('error', '鉴权失败：请在 PC 端重新生成配对码并配对')
           } else {
             // 服务器保持连接打开，先关闭旧 socket 再调度重连，避免泄漏
             this.teardownSocket()

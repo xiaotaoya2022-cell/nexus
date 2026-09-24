@@ -5,7 +5,7 @@
 // - 公网场景建议 Tailscale 组网后复用同一协议（草案 §备通道）
 
 import { WebSocketServer, WebSocket } from 'ws'
-import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto'
 import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type {
@@ -93,7 +93,7 @@ export class RemoteServer {
 
   constructor(
     private readonly deps: Deps,
-    private readonly _secret: string // 保留位：token 已改为二维码配对密钥派生（P1-1），不再依赖服务端 secret
+    _secret: string // 保留位：token 已改为二维码配对密钥派生（P1-1），不再依赖服务端 secret
   ) {
     this.auditPath = join(deps.userDataDir, 'remote-audit.jsonl')
   }
@@ -131,7 +131,7 @@ export class RemoteServer {
       host: '0.0.0.0',
       port: 0,
       maxPayload: MAX_FRAME_BYTES,
-      verifyClient: (info) => {
+      verifyClient: (info: { origin?: string; req: { headers: Record<string, unknown> } }) => {
         const origin = info.req.headers.origin
         return origin == null || !/^https?:\/\//i.test(String(origin))
       }
@@ -435,7 +435,11 @@ export class RemoteServer {
         Buffer.from(p.proof)
       )
     const pinOk =
-      active && typeof p.pin === 'string' && p.pin.length === 6 && timingSafeEqual(Buffer.from(p.pin), Buffer.from(this.pin))
+      active &&
+      typeof p.pin === 'string' &&
+      p.pin.length === 6 &&
+      this.pin != null &&
+      timingSafeEqual(Buffer.from(p.pin), Buffer.from(this.pin))
     if (!proofOk || !pinOk) {
       this.pairFailures += 1
       this.audit('unpaired', 'pair', false, `证明或 PIN 无效（失败 ${this.pairFailures}）`)
