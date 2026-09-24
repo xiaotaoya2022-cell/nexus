@@ -4,7 +4,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
   AgentInfo,
-  CalendarDay,
   HeatmapData,
   NamedStat,
   Overview,
@@ -23,7 +22,6 @@ export interface DashboardData {
   byModel: NamedStat[]
   breakdown: TokenTypeStat[]
   heatmap: HeatmapData
-  calendar: CalendarDay[]
   tools: ToolStat[]
   sessions: SessionRow[]
 }
@@ -43,7 +41,8 @@ export function useDashboard(): {
   const reloadRef = useRef<() => Promise<void>>(async () => {})
 
   const reload = useCallback(async (): Promise<void> => {
-    const [overview, trend, byAgent, byModel, breakdown, heatmap, calendar, tools, sessions, agentInfos] =
+    // getCalendar 通道保留在 IPC 契约中备用，看板已改用 trend 呈现每日强度（红队 N-16）
+    const [overview, trend, byAgent, byModel, breakdown, heatmap, tools, sessions, agentInfos] =
       await Promise.all([
         nexus.getOverview(range, agent),
         nexus.getTrend(range, agent, trendGroup),
@@ -51,12 +50,11 @@ export function useDashboard(): {
         nexus.getByModel(range, agent),
         nexus.getTokenTypeBreakdown(range, agent),
         nexus.getHeatmap(range, agent),
-        nexus.getCalendar(range, agent),
         nexus.getToolStats(range, agent),
         nexus.getSessions(range, agent, 120),
         nexus.getAgents()
       ])
-    setData({ overview, trend, byAgent, byModel, breakdown, heatmap, calendar, tools, sessions })
+    setData({ overview, trend, byAgent, byModel, breakdown, heatmap, tools, sessions })
     setAgents(agentInfos)
   }, [range, agent, trendGroup])
 

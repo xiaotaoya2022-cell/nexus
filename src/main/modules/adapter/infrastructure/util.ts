@@ -5,9 +5,12 @@ import { readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { createReadStream } from 'node:fs'
 
-/** 打开只读 SQLite（readOnly 语义等价 mode=ro，绝不写用户数据） */
+/** 打开只读 SQLite（readOnly 语义等价 mode=ro，绝不写用户数据）。
+ * busy_timeout=5s：外部库（如 ZCode）处于活动 WAL 写入中，避免偶发 SQLITE_BUSY。 */
 export function openReadonlyDb(path: string): DatabaseSync {
-  return new DatabaseSync(path, { readOnly: true })
+  const db = new DatabaseSync(path, { readOnly: true })
+  db.prepare('PRAGMA busy_timeout = 5000').get()
+  return db
 }
 
 /** 列出 SQLite 表的列名（只读连接上执行 PRAGMA 安全） */

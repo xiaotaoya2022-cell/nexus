@@ -17,6 +17,9 @@ import { openReadonlyDb, tableColumns } from '../util'
 import type { DatabaseSync } from 'node:sqlite'
 
 const CHUNK = 5000
+// 红队 N-01：行落库时刻晚于 started_at，纯 >= lastTs 游标会永久漏行。
+// 读取统一带 24h 安全重叠窗，配合 store 层按 dedupe_key 的 upsert，重叠重读既补漏又刷新值。
+const OVERLAP_MS = 24 * 60 * 60_000
 
 function num(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0
@@ -57,7 +60,8 @@ export class ZCodeAdapter implements AgentAdapter {
 
   private async syncUsage(db: DatabaseSync, ctx: SyncContext, result: SyncResult): Promise<void> {
     if (!tableColumns(db, 'model_usage').length) return
-    let lastTs = ctx.state.lastTs
+    const since = Math.max(0, ctx.state.lastTs - OVERLAP_MS)
+    let cursor = since
     for (;;) {
       const rows = db
         .prepare(
@@ -66,13 +70,16 @@ export class ZCodeAdapter implements AgentAdapter {
                   cache_creation_input_tokens, cache_read_input_tokens, computed_total_tokens
            FROM model_usage WHERE started_at >= ? ORDER BY started_at ASC LIMIT ${CHUNK}`
         )
-        .all(lastTs) as Array<Record<string, unknown>>
+        .all(cursor) as Array<Record<string, unknown>>
       if (!rows.length) break
       const records = rows.map((r) => {
         const reportedInput = num(r.input_tokens)
         const cacheRead = num(r.cache_read_input_tokens)
         const cacheWrite = num(r.cache_creation_input_tokens)
-        // 口径归一化：ZCode input 含缓存 → 扣减为互斥字段
+        // 口径归一化（红队 N-03 复核结论）：
+        // 1) ZCode input 含缓存 → 扣减为互斥字段；
+        // 2) 实测 computed_total = input + output（49,215/49,215 行），
+        //    reasoning 已含于 output，若单独累加会双计 → 归并入 output 后置 0。
         const input = Math.max(0, reportedInput - cacheRead - cacheWrite)
         return {
           agent: this.id,
@@ -81,7 +88,7 @@ export class ZCodeAdapter implements AgentAdapter {
           ts: num(r.started_at),
           inputTokens: input,
           outputTokens: num(r.output_tokens),
-          reasoningTokens: num(r.reasoning_tokens),
+          reasoningTokens: 0,
           cacheReadTokens: cacheRead,
           cacheWriteTokens: cacheWrite,
           sessionId: str(r.session_id),
@@ -89,9 +96,10 @@ export class ZCodeAdapter implements AgentAdapter {
         }
       })
       result.records += this.store.insertUsage(records)
-      const maxTs = rows.reduce((m, r) => Math.max(m, num(r.started_at)), lastTs)
-      lastTs = Math.max(maxTs, lastTs)
-      result.lastTs = lastTs
+      const batchMax = rows.reduce((m, r) => Math.max(m, num(r.started_at)), cursor)
+      if (batchMax <= cursor) break // 同毫秒兜底，防死循环
+      cursor = batchMax
+      result.lastTs = Math.max(result.lastTs, cursor)
       if (rows.length < CHUNK) break
     }
   }
@@ -100,14 +108,14 @@ export class ZCodeAdapter implements AgentAdapter {
     const cols = tableColumns(db, 'session')
     if (!cols.length) return
     const meta = ctx.state.meta as { sessionLastTs?: number }
-    let lastTs = meta.sessionLastTs ?? 0
+    let cursor = Math.max(0, (meta.sessionLastTs ?? 0) - OVERLAP_MS)
     for (;;) {
       const rows = db
         .prepare(
           `SELECT id, directory, title, time_created, time_updated, task_type
            FROM session WHERE time_updated >= ? ORDER BY time_updated ASC LIMIT ${CHUNK}`
         )
-        .all(lastTs) as Array<Record<string, unknown>>
+        .all(cursor) as Array<Record<string, unknown>>
       if (!rows.length) break
       result.sessions += this.store.upsertSessions(
         rows.map((r) => ({
@@ -120,11 +128,12 @@ export class ZCodeAdapter implements AgentAdapter {
           updatedAt: num(r.time_updated) || null
         }))
       )
-      const maxTs = rows.reduce((m, r) => Math.max(m, num(r.time_updated)), lastTs)
-      lastTs = maxTs
+      const maxTs = rows.reduce((m, r) => Math.max(m, num(r.time_updated)), cursor)
+      if (maxTs <= cursor) break
+      cursor = maxTs
       if (rows.length < CHUNK) break
     }
-    meta.sessionLastTs = lastTs
+    meta.sessionLastTs = Math.max(cursor, meta.sessionLastTs ?? 0)
     result.meta = meta
   }
 
@@ -136,11 +145,12 @@ export class ZCodeAdapter implements AgentAdapter {
     if (!has('tool_name') || !has('id')) return
     const meta = ctx.state.meta as { toolLastTs?: number }
     let toolLastTs = meta.toolLastTs ?? 0
+    let cursor = tsCol ? Math.max(0, toolLastTs - OVERLAP_MS) : 0
     const select = `SELECT id, tool_name, session_id${tsCol ? `, ${tsCol}` : ''} FROM tool_usage`
     const where = tsCol ? ` WHERE ${tsCol} >= ? ORDER BY ${tsCol} ASC` : ''
     const stmt = db.prepare(`${select}${where} LIMIT 5000`)
     for (;;) {
-      const rows = stmt.all(...(tsCol ? [toolLastTs] : [])) as Array<Record<string, unknown>>
+      const rows = stmt.all(...(tsCol ? [cursor] : [])) as Array<Record<string, unknown>>
       if (!rows.length) break
       result.tools += this.store.insertToolCalls(
         rows.map((r) => ({
@@ -152,13 +162,13 @@ export class ZCodeAdapter implements AgentAdapter {
         }))
       )
       if (!tsCol) break
-      const batchMax = rows.reduce((m, r) => Math.max(m, num(r[tsCol])), toolLastTs)
-      if (batchMax === toolLastTs) break // 同一毫秒兜底，防死循环
-      toolLastTs = batchMax
+      const batchMax = rows.reduce((m, r) => Math.max(m, num(r[tsCol])), cursor)
+      if (batchMax <= cursor) break // 同毫秒兜底，防死循环
+      cursor = batchMax
       if (rows.length < 5000) break
     }
     if (tsCol) {
-      meta.toolLastTs = toolLastTs
+      meta.toolLastTs = Math.max(toolLastTs, cursor)
       result.meta = meta
     }
   }

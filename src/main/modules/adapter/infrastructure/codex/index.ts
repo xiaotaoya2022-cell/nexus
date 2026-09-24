@@ -19,6 +19,8 @@ import { collectFiles, parseTimestampMs, readJsonlIncremental } from '../util'
 interface CodexMeta {
   offsets: Record<string, number>
   models: Record<string, string | null>
+  /** 文件 → session_meta 的真实会话 id（增量续读时 meta 行已在 offset 之前，靠缓存取回） */
+  sessionIds: Record<string, string>
 }
 
 interface SessionAcc {
@@ -34,9 +36,10 @@ interface FileScanState {
 }
 
 function sessionIdFromFile(file: string): string {
+  // rollout-<ISO时间戳>-<uuid>.jsonl → 只取末段纯 uuid（红队 N-04：旧正则会吞进时间数字段）
   const base = file.split(/[\\/]/).pop() ?? file
-  const m = base.match(/([0-9a-fA-F][0-9a-fA-F-]{15,})\.jsonl$/)
-  return m ? m[1] : base.replace(/\.jsonl$/, '')
+  const m = base.match(/-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i)
+  return m ? m[1] : `file:${base.replace(/\.jsonl$/, '')}`
 }
 
 export class CodexAdapter implements AgentAdapter {
@@ -54,6 +57,7 @@ export class CodexAdapter implements AgentAdapter {
     const meta = (ctx.state.meta as Partial<CodexMeta> | undefined) ?? {}
     const offsets: Record<string, number> = meta.offsets ?? {}
     const models: Record<string, string | null> = meta.models ?? {}
+    const sessionIds: Record<string, string> = meta.sessionIds ?? {}
     const result: SyncResult = {
       records: 0,
       sessions: 0,
@@ -68,7 +72,7 @@ export class CodexAdapter implements AgentAdapter {
     for (const file of files) {
       const prevOffset = offsets[file] ?? 0
       const st: FileScanState = { session: null, model: models[file] ?? null }
-      const fallbackSessionId = sessionIdFromFile(file)
+      const fallbackSessionId = sessionIds[file] ?? sessionIdFromFile(file)
 
       const newOffset = await readJsonlIncremental(file, prevOffset, (line) => {
         if (!line.trim()) return
@@ -87,6 +91,7 @@ export class CodexAdapter implements AgentAdapter {
         const payload = ev.payload as Record<string, unknown> | undefined
         if (ev.type === 'session_meta' && payload) {
           const sid = typeof payload.id === 'string' && payload.id ? payload.id : fallbackSessionId
+          sessionIds[file] = sid
           const acc: SessionAcc = {
             sessionId: sid,
             cwd: typeof payload.cwd === 'string' ? payload.cwd : null,
@@ -155,7 +160,7 @@ export class CodexAdapter implements AgentAdapter {
         }))
       )
     }
-    result.meta = { offsets, models }
+    result.meta = { offsets, models, sessionIds }
     return result
   }
 }

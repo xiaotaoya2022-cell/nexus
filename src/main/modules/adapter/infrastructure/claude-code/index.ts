@@ -106,7 +106,8 @@ export class ClaudeCodeAdapter implements AgentAdapter {
           cacheReadTokens: cacheRead,
           cacheWriteTokens: cacheWrite,
           sessionId: st.session ? st.session.sessionId : null,
-          dedupeKey: `claude:ln:${tag}:${ev.uuid ?? `${prevOffset}:${line.length}`}`
+          // 回退键不得含读取位置（offset），否则中断重读会产生不同 key 重复入库（红队 N-05）
+          dedupeKey: `claude:ln:${tag}:${ev.uuid ?? `${ts ?? 0}:${line.length}`}`
         })
         if (ts != null && ts > result.lastTs) result.lastTs = ts
       })

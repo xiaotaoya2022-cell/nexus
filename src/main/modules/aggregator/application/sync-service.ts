@@ -90,9 +90,20 @@ export class SyncService {
       message: '',
       finishedAt: Date.now()
     }
+    this.cleanup()
     this.broadcast(this.status)
     this.syncing = false
     return this.status
+  }
+
+  /** 保留策略（立项书 §4.3）：settings.retentionDays > 0 时清理超期自有数据；0/未设 = 永久保留 */
+  private cleanup(): void {
+    const days = Number(this.store.getSetting('retentionDays') ?? 0)
+    if (!Number.isFinite(days) || days <= 0) return
+    const cutoff = Date.now() - days * 86400_000
+    this.store.db.prepare('DELETE FROM usage_records WHERE ts < ?').run(cutoff)
+    this.store.db.prepare('DELETE FROM tool_calls WHERE ts IS NOT NULL AND ts < ?').run(cutoff)
+    logger.info('store.cleanup', { retentionDays: days, cutoff })
   }
 
   dispose(): void {

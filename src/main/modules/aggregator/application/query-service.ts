@@ -28,6 +28,18 @@ export function rangeStartMs(range: RangeKey, now = Date.now()): number {
     d.setHours(0, 0, 0, 0)
     return d.getTime()
   }
+  if (range === 'month') {
+    const d = new Date(now)
+    d.setDate(1)
+    d.setHours(0, 0, 0, 0)
+    return d.getTime()
+  }
+  if (range === 'year') {
+    const d = new Date(now)
+    d.setMonth(0, 1)
+    d.setHours(0, 0, 0, 0)
+    return d.getTime()
+  }
   const days = range === '7d' ? 7 : 30
   return now - days * 86400_000
 }

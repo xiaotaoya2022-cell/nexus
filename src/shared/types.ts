@@ -1,7 +1,7 @@
 // Nexus 共享类型：主进程 / preload / 渲染进程共用。
 // 只放纯数据结构与 API 契约，禁止引入 Node 专用模块。
 
-export type RangeKey = 'today' | '7d' | '30d' | 'all'
+export type RangeKey = 'today' | '7d' | '30d' | 'month' | 'year' | 'all'
 
 export type AgentStatus = 'active' | 'idle' | 'offline' | 'nodata'
 

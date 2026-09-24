@@ -367,7 +367,7 @@ export default function App(): JSX.Element {
         </main>
 
         <div className="hidden 2xl:flex">
-          <SessionsPanel sessions={data?.sessions ?? []} agents={agents} />
+          <SessionsPanel sessions={data?.sessions ?? []} agentColors={agentColors} />
         </div>
       </div>
 

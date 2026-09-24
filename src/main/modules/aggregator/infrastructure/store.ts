@@ -64,7 +64,10 @@ const SCHEMA_STATEMENTS: string[] = [
     meta TEXT,
     updated_at INTEGER
   )`,
-  'CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)'
+  'CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)',
+  // 一次性口径修正（红队 N-03）：ZCode 的 reasoning 已含于 output，历史行单独累加会双计；
+  // 适配器新写入恒为 0，此语句幂等，只纠正存量。
+  "UPDATE usage_records SET reasoning_tokens = 0 WHERE agent = 'zcode' AND reasoning_tokens != 0"
 ]
 
 export class NexusStore implements StoreWriter {
@@ -83,11 +86,21 @@ export class NexusStore implements StoreWriter {
   private stmtTool!: ReturnType<DatabaseSync['prepare']>
 
   private prepareStatements(): void {
+    // 幂等且可刷新：重叠窗重读时同 dedupe_key 更新时间与用量（红队 N-01 修复）
     this.stmtUsage = this.db.prepare(`
-      INSERT OR IGNORE INTO usage_records
+      INSERT INTO usage_records
         (agent, model, provider, ts, input_tokens, output_tokens, reasoning_tokens,
          cache_read_tokens, cache_write_tokens, session_id, dedupe_key, is_estimated)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(dedupe_key) DO UPDATE SET
+        ts = excluded.ts,
+        model = excluded.model,
+        input_tokens = excluded.input_tokens,
+        output_tokens = excluded.output_tokens,
+        reasoning_tokens = excluded.reasoning_tokens,
+        cache_read_tokens = excluded.cache_read_tokens,
+        cache_write_tokens = excluded.cache_write_tokens,
+        session_id = COALESCE(excluded.session_id, usage_records.session_id)
     `)
     this.stmtSession = this.db.prepare(`
       INSERT INTO sessions (agent, session_id, title, project_dir, model, started_at, updated_at)
@@ -100,8 +113,9 @@ export class NexusStore implements StoreWriter {
         updated_at = MAX(COALESCE(sessions.updated_at, 0), COALESCE(excluded.updated_at, 0))
     `)
     this.stmtTool = this.db.prepare(`
-      INSERT OR IGNORE INTO tool_calls (agent, tool_name, ts, session_id, dedupe_key)
+      INSERT INTO tool_calls (agent, tool_name, ts, session_id, dedupe_key)
       VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(dedupe_key) DO UPDATE SET ts = excluded.ts, tool_name = excluded.tool_name
     `)
   }
 

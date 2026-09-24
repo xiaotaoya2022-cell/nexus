@@ -96,18 +96,31 @@ function createWindow(): void {
   }
 }
 
+// 单实例锁（红队 N-14）：双开会导致双份同步循环互踩 sync_state
+if (!app.requestSingleInstanceLock()) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.focus()
+    }
+  })
+}
+
 if (process.env.NEXUS_CAPTURE) {
   // 截图验证场景禁用 GPU 合成，避免 capturePage 出现图层伪影
   app.disableHardwareAcceleration()
 }
 
-app.whenReady().then(() => {
+app.whenReady()
+  .then(() => {
   const dbPath = join(app.getPath('userData'), 'nexus.db')
   store = new NexusStore(dbPath)
   logger.info('store.ready', { dbPath })
 
   const theme = store.getSetting('theme')
-  nativeTheme.themeSource = theme === 'light' || theme === 'system' ? theme : 'dark'
+  nativeTheme.themeSource = theme === 'light' ? 'light' : 'dark'
 
   const adapters = createAdapters(store)
   const query = new QueryService(store)
@@ -124,7 +137,17 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
-})
+  })
+  .catch((err) => {
+    // 启动失败（如 nexus.db 损坏/被占用）必须可见，不能无声无息（红队 N-08）
+    const message = err instanceof Error ? err.message : String(err)
+    logger.error('app.startup_failed', { error: message })
+    // dialog 需要延迟到 app 就绪后；此处已处于 whenReady 链内
+    void import('electron').then(({ dialog }) => {
+      dialog.showErrorBox('Nexus 启动失败', message)
+      app.exit(1)
+    })
+  })
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()

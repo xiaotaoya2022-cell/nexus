@@ -1,18 +1,18 @@
 // 会话明细面板（右栏）：按所选范围与 Agent 过滤，按 Token 降序。
 
-import type { AgentInfo, SessionRow } from '@shared/types'
+import type { SessionRow } from '@shared/types'
 import type { JSX } from 'react'
 import { compactNumber, fullNumber, relativeTime, shortDir, shortId } from '@renderer/lib/format'
 import { EmptyState } from './ui'
 
 export function SessionsPanel({
   sessions,
-  agents
+  agentColors
 }: {
   sessions: SessionRow[]
-  agents: AgentInfo[]
+  /** 与环形图/侧栏一致的全局 Agent 配色（红队 N-15） */
+  agentColors: Map<string, string>
 }): JSX.Element {
-  const colorByAgent = new Map(agents.map((a, i) => [a.id, i]))
   return (
     <aside className="flex w-[320px] shrink-0 flex-col gap-2 rounded-xl bg-panel p-3">
       <header className="flex items-center justify-between px-1">
@@ -27,7 +27,6 @@ export function SessionsPanel({
         ) : (
           <ul className="space-y-0.5">
             {sessions.map((s) => {
-              const colorIdx = colorByAgent.get(s.agent) ?? 0
               return (
                 <li
                   key={`${s.agent}:${s.sessionId}`}
@@ -36,9 +35,7 @@ export function SessionsPanel({
                 >
                   <span
                     className="h-1.5 w-1.5 shrink-0 rounded-full"
-                    style={{
-                      backgroundColor: `var(--nx-chart-${(colorIdx % 6) + 1})`
-                    }}
+                    style={{ backgroundColor: agentColors.get(s.agent) ?? 'var(--nx-chart-1)' }}
                   />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-ui-caption text-foreground">

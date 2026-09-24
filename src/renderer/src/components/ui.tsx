@@ -199,5 +199,7 @@ export const RANGE_OPTIONS: Array<{ key: RangeKey; label: string }> = [
   { key: 'today', label: '今日' },
   { key: '7d', label: '近 7 天' },
   { key: '30d', label: '近 30 天' },
+  { key: 'month', label: '本月' },
+  { key: 'year', label: '今年' },
   { key: 'all', label: '全部' }
 ]

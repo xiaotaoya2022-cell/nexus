@@ -181,7 +181,10 @@ export function heatmapOption(data: HeatmapData, tokens: ChartTokens): EChartsOp
       show: false,
       min: 0,
       max: Math.max(data.max, 1),
-      inRange: { color: [tokens.heat[1], tokens.heat[2], tokens.heat[3], tokens.heat[4]] }
+      // 五档含空档：0 值格映射 heat[0]，非零才进蓝色渐变（红队 N-07）
+      inRange: {
+        color: [tokens.heat[0], tokens.heat[1], tokens.heat[2], tokens.heat[3], tokens.heat[4]]
+      }
     },
     series: [
       {

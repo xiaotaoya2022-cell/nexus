@@ -22,7 +22,8 @@ import {
 } from '../util'
 
 interface AgxMeta {
-  sessionLastTs: number
+  /** last_modified_time 为 TEXT（ISO 串），按原文本做字典序游标（红队 N-06） */
+  sessionCursor: string
   lastRowid: number
 }
 
@@ -61,7 +62,7 @@ export class AntigravityAdapter implements AgentAdapter {
       sessions: 0,
       tools: 0,
       lastTs: ctx.state.lastTs,
-      meta: { ...meta, sessionLastTs: meta.sessionLastTs ?? 0, lastRowid: meta.lastRowid ?? 0 }
+      meta: { ...meta, sessionCursor: meta.sessionCursor ?? '', lastRowid: meta.lastRowid ?? 0 }
     }
     this.syncSessions(ctx, result)
     this.syncCockpitUsage(ctx, result)
@@ -84,7 +85,7 @@ export class AntigravityAdapter implements AgentAdapter {
           `SELECT conversation_id, title, last_modified_time, workspace_uris, agent_name
            FROM conversation_summaries WHERE last_modified_time >= ? LIMIT 20000`
         )
-        .all(m.sessionLastTs) as Array<Record<string, unknown>>
+        .all(m.sessionCursor) as Array<Record<string, unknown>>
       if (!rows.length) return
       result.sessions += this.store.upsertSessions(
         rows.map((r) => ({
@@ -97,9 +98,10 @@ export class AntigravityAdapter implements AgentAdapter {
           updatedAt: parseTimestampMs(r.last_modified_time)
         }))
       )
-      m.sessionLastTs = rows.reduce(
-        (max, r) => Math.max(max, num(parseTimestampMs(r.last_modified_time) ?? 0)),
-        m.sessionLastTs
+      // TEXT 列按原文本取最大值做游标（同格式 ISO 串字典序 == 时间序）
+      m.sessionCursor = rows.reduce(
+        (max, r) => (typeof r.last_modified_time === 'string' && r.last_modified_time > max ? r.last_modified_time : max),
+        m.sessionCursor
       )
     } finally {
       db.close()

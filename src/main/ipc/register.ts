@@ -69,6 +69,23 @@ function buildAgentInfos(deps: IpcDeps): AgentInfo[] {
     }
   }
 
+  // 会话数：sessions 表与 usage_records 去重会话的「并集」计数，避免双计（红队 N-02）
+  const sessionUnion = new Map<string, number>()
+  {
+    const rows = deps.store.db
+      .prepare(
+        `SELECT agent, COUNT(*) c FROM (
+           SELECT agent, session_id FROM sessions
+           UNION
+           SELECT agent, session_id FROM usage_records WHERE session_id IS NOT NULL
+         ) GROUP BY agent`
+      )
+      .all() as Array<Record<string, unknown>>
+    for (const r of rows) {
+      sessionUnion.set(String(r.agent), Number(r.c) || 0)
+    }
+  }
+
   const infos: AgentInfo[] = []
   for (const [id, meta] of known) {
     const adapter = deps.adapters.find((a) => a.id === id)
@@ -77,7 +94,7 @@ function buildAgentInfos(deps: IpcDeps): AgentInfo[] {
     const act = activity.get(id)
     const so = sessionOnly.get(id)
     const last = act?.last ?? so?.last ?? null
-    const sessions = (act?.sessions ?? 0) + (so?.sessions ?? 0)
+    const sessions = sessionUnion.get(id) ?? 0
     let status: AgentInfo['status']
     if (!detected && !today && !act) status = 'nodata'
     else if (last != null && now - last <= ACTIVE_WINDOW_MS) status = 'active'
@@ -143,12 +160,14 @@ export function registerIpc(deps: IpcDeps): void {
 
   ipcMain.handle('nexus:getSettings', (): Settings => {
     const theme = deps.store.getSetting('theme')
-    return { theme: theme === 'light' || theme === 'dark' || theme === 'system' ? theme : 'dark' }
+    // 只提供 dark/light 两档：'system' 在渲染层有时序歧义（红队 N-13），存量为 system 时归一为 dark
+    return { theme: theme === 'light' ? 'light' : 'dark' }
   })
   ipcMain.handle('nexus:setTheme', (_e, theme: Settings['theme']): Settings => {
-    deps.store.setSetting('theme', theme)
-    nativeTheme.themeSource = theme
-    return { theme }
+    const normalized = theme === 'light' ? 'light' : 'dark'
+    deps.store.setSetting('theme', normalized)
+    nativeTheme.themeSource = normalized
+    return { theme: normalized }
   })
 
   ipcMain.handle('nexus:exportBoard', async () => {
@@ -171,8 +190,10 @@ export function registerIpc(deps: IpcDeps): void {
   })
 
   ipcMain.handle('nexus:openPath', async (_e, path: string) => {
+    // 防御纵深（红队 N-09）：路径数据源自外部 Agent 库的不可控字符串，
+    // 只在文件管理器中定位，绝不直接执行/打开。
     if (typeof path === 'string' && path.length > 0) {
-      await shell.openPath(path)
+      shell.showItemInFolder(path)
     }
   })
 
