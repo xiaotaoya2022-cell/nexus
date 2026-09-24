@@ -61,16 +61,19 @@ export class ZCodeAdapter implements AgentAdapter {
   private async syncUsage(db: DatabaseSync, ctx: SyncContext, result: SyncResult): Promise<void> {
     if (!tableColumns(db, 'model_usage').length) return
     const since = Math.max(0, ctx.state.lastTs - OVERLAP_MS)
-    let cursor = since
+    // keyset 分页 (started_at, id)：消除单毫秒 >CHUNK 行时的分页墙（蓝队 F1）
+    let cursorTs = since
+    let cursorId = 0
+    const stmt = db.prepare(
+      `SELECT id, session_id, provider_id, model_id, started_at, status,
+              input_tokens, output_tokens, reasoning_tokens,
+              cache_creation_input_tokens, cache_read_input_tokens, computed_total_tokens
+       FROM model_usage
+       WHERE started_at > ? OR (started_at = ? AND id > ?)
+       ORDER BY started_at ASC, id ASC LIMIT ${CHUNK}`
+    )
     for (;;) {
-      const rows = db
-        .prepare(
-          `SELECT id, session_id, provider_id, model_id, started_at, status,
-                  input_tokens, output_tokens, reasoning_tokens,
-                  cache_creation_input_tokens, cache_read_input_tokens, computed_total_tokens
-           FROM model_usage WHERE started_at >= ? ORDER BY started_at ASC LIMIT ${CHUNK}`
-        )
-        .all(cursor) as Array<Record<string, unknown>>
+      const rows = stmt.all(cursorTs, cursorTs, cursorId) as Array<Record<string, unknown>>
       if (!rows.length) break
       const records = rows.map((r) => {
         const reportedInput = num(r.input_tokens)
@@ -96,10 +99,13 @@ export class ZCodeAdapter implements AgentAdapter {
         }
       })
       result.records += this.store.insertUsage(records)
-      const batchMax = rows.reduce((m, r) => Math.max(m, num(r.started_at)), cursor)
-      if (batchMax <= cursor) break // 同毫秒兜底，防死循环
-      cursor = batchMax
-      result.lastTs = Math.max(result.lastTs, cursor)
+      const last = rows[rows.length - 1]
+      const batchTs = num(last.started_at)
+      const batchId = num(last.id)
+      if (batchTs < cursorTs || (batchTs === cursorTs && batchId <= cursorId)) break // 无进展兜底
+      cursorTs = batchTs
+      cursorId = batchId
+      result.lastTs = Math.max(result.lastTs, batchTs)
       if (rows.length < CHUNK) break
     }
   }
@@ -145,31 +151,54 @@ export class ZCodeAdapter implements AgentAdapter {
     if (!has('tool_name') || !has('id')) return
     const meta = ctx.state.meta as { toolLastTs?: number }
     let toolLastTs = meta.toolLastTs ?? 0
-    let cursor = tsCol ? Math.max(0, toolLastTs - OVERLAP_MS) : 0
-    const select = `SELECT id, tool_name, session_id${tsCol ? `, ${tsCol}` : ''} FROM tool_usage`
-    const where = tsCol ? ` WHERE ${tsCol} >= ? ORDER BY ${tsCol} ASC` : ''
-    const stmt = db.prepare(`${select}${where} LIMIT 5000`)
+    if (!tsCol) {
+      // 无时间列的数据源：一次性全量（dedupe 幂等），游标不适用
+      const rows = db
+        .prepare(`SELECT id, tool_name, session_id FROM tool_usage LIMIT 50000`)
+        .all() as Array<Record<string, unknown>>
+      if (rows.length) {
+        result.tools = this.store.insertToolCalls(
+          rows.map((r) => ({
+            agent: this.id,
+            toolName: str(r.tool_name) ?? 'unknown',
+            ts: null,
+            sessionId: str(r.session_id),
+            dedupeKey: `zcode:tool:${str(r.id) ?? ''}`
+          }))
+        )
+      }
+      return
+    }
+    // keyset 分页 (ts, id)，同 usage（蓝队 F1）
+    let cursorTs = Math.max(0, toolLastTs - OVERLAP_MS)
+    let cursorId = 0
+    const stmt = db.prepare(
+      `SELECT id, tool_name, session_id, ${tsCol}
+       FROM tool_usage
+       WHERE ${tsCol} > ? OR (${tsCol} = ? AND id > ?)
+       ORDER BY ${tsCol} ASC, id ASC LIMIT 5000`
+    )
     for (;;) {
-      const rows = stmt.all(...(tsCol ? [cursor] : [])) as Array<Record<string, unknown>>
+      const rows = stmt.all(cursorTs, cursorTs, cursorId) as Array<Record<string, unknown>>
       if (!rows.length) break
       result.tools += this.store.insertToolCalls(
         rows.map((r) => ({
           agent: this.id,
           toolName: str(r.tool_name) ?? 'unknown',
-          ts: tsCol ? num(r[tsCol]) || null : null,
+          ts: num(r[tsCol]) || null,
           sessionId: str(r.session_id),
           dedupeKey: `zcode:tool:${str(r.id) ?? ''}`
         }))
       )
-      if (!tsCol) break
-      const batchMax = rows.reduce((m, r) => Math.max(m, num(r[tsCol])), cursor)
-      if (batchMax <= cursor) break // 同毫秒兜底，防死循环
-      cursor = batchMax
+      const last = rows[rows.length - 1]
+      const batchTs = num(last[tsCol])
+      const batchId = num(last.id)
+      if (batchTs < cursorTs || (batchTs === cursorTs && batchId <= cursorId)) break // 无进展兜底
+      cursorTs = batchTs
+      cursorId = batchId
       if (rows.length < 5000) break
     }
-    if (tsCol) {
-      meta.toolLastTs = Math.max(toolLastTs, cursor)
-      result.meta = meta
-    }
+    meta.toolLastTs = Math.max(toolLastTs, cursorTs)
+    result.meta = meta
   }
 }

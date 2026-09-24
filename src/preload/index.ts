@@ -19,6 +19,9 @@ const api: NexusApi = {
   syncNow: () => ipcRenderer.invoke('nexus:syncNow'),
   getSettings: () => ipcRenderer.invoke('nexus:getSettings'),
   setTheme: (theme: Settings['theme']) => ipcRenderer.invoke('nexus:setTheme', theme),
+  getRetentionDays: () => ipcRenderer.invoke('nexus:getRetentionDays'),
+  setRetentionDays: (days: number) => ipcRenderer.invoke('nexus:setRetentionDays', days),
+  getDataDir: () => ipcRenderer.invoke('nexus:getDataDir'),
   exportBoard: () => ipcRenderer.invoke('nexus:exportBoard'),
   openPath: (path) => ipcRenderer.invoke('nexus:openPath', path),
   onSyncProgress: (cb: (p: SyncProgress) => void) => {

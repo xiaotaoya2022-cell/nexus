@@ -5,10 +5,10 @@
 
 | 模块 | 职责 | 文档 | 最后更新 |
 | --- | --- | --- | --- |
-| adapter | 各 AI Agent 本地数据源的定位与增量解析 | [adapter.md](adapter.md) | 2026-09-25 01:27:57 |
-| aggregator | Nexus 自有 SQLite 存储、同步编排、看板查询 | [aggregator.md](aggregator.md) | 2026-09-25 01:27:57 |
-| dashboard | 渲染层看板（KPI/图表矩阵/侧栏/会话明细） | [dashboard.md](dashboard.md) | 2026-09-25 01:27:57 |
-| shared | 主/渲染进程共享类型契约与日志 | 见 `src/shared/types.ts`、`src/main/modules/shared/logger.ts` | 2026-09-25 01:27:57 |
+| adapter | 各 AI Agent 本地数据源的定位与增量解析 | [adapter.md](adapter.md) | 2026-09-25 02:42:39 |
+| aggregator | Nexus 自有 SQLite 存储、同步编排、看板查询 | [aggregator.md](aggregator.md) | 2026-09-25 02:42:39 |
+| dashboard | 渲染层看板（KPI/图表矩阵/侧栏/会话明细） | [dashboard.md](dashboard.md) | 2026-09-25 02:42:39 |
+| shared | 主/渲染进程共享类型契约与日志 | 见 `src/shared/types.ts`、`src/main/modules/shared/logger.ts` | 2026-09-25 02:42:39 |
 
 ## 进程结构
 

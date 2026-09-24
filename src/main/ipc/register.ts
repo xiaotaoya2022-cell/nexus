@@ -1,7 +1,7 @@
 // transport 层：把 query/sync/设置/导出能力以 IPC 通道暴露给渲染进程。
 // 依赖方向：transport → application → domain ← infrastructure。
 
-import { ipcMain, dialog, BrowserWindow, nativeTheme, shell } from 'electron'
+import { ipcMain, dialog, BrowserWindow, nativeTheme, shell, app } from 'electron'
 import type { NexusApi, RangeKey, Settings, SyncProgress } from '@shared/types'
 import type { QueryService } from '../modules/aggregator/application/query-service'
 import type { SyncService } from '../modules/aggregator/application/sync-service'
@@ -169,6 +169,17 @@ export function registerIpc(deps: IpcDeps): void {
     nativeTheme.themeSource = normalized
     return { theme: normalized }
   })
+
+  ipcMain.handle('nexus:getRetentionDays', (): number => {
+    const v = Number(deps.store.getSetting('retentionDays') ?? 0)
+    return Number.isFinite(v) && v > 0 ? v : 0
+  })
+  ipcMain.handle('nexus:setRetentionDays', (_e, days: number): number => {
+    const normalized = Number.isFinite(days) && days > 0 ? Math.round(days) : 0
+    deps.store.setSetting('retentionDays', String(normalized))
+    return normalized
+  })
+  ipcMain.handle('nexus:getDataDir', () => app.getPath('userData'))
 
   ipcMain.handle('nexus:exportBoard', async () => {
     const win = deps.getMainWindow()

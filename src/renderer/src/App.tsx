@@ -13,6 +13,7 @@ import {
   ChartCard,
   EmptyState,
   ExportIcon,
+  GearIcon,
   IconButton,
   KpiCard,
   LegendItem,
@@ -49,6 +50,8 @@ export default function App(): JSX.Element {
   const sync = useUi((s) => s.sync)
   const { data, agents, trendGroup, setTrendGroup } = useDashboard()
   const [toast, setToast] = useState<string | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [retention, setRetention] = useState<number>(0)
 
   // 启动时读取主题设置
   useEffect(() => {
@@ -103,6 +106,17 @@ export default function App(): JSX.Element {
     const next = theme === 'dark' ? 'light' : 'dark'
     setTheme(next)
     await nexus.setTheme(next)
+  }
+
+  const openSettings = async (): Promise<void> => {
+    if (!settingsOpen) setRetention(await nexus.getRetentionDays())
+    setSettingsOpen((v) => !v)
+  }
+
+  const changeRetention = async (days: number): Promise<void> => {
+    const v = await nexus.setRetentionDays(days)
+    setRetention(v)
+    setToast(days > 0 ? `数据保留 ${days} 天，下轮同步后生效` : '数据永久保留')
   }
 
   const totalTokens = data?.overview.totals.total ?? 0
@@ -179,7 +193,7 @@ export default function App(): JSX.Element {
   return (
     <div className="flex h-full flex-col bg-background text-foreground">
       {/* 顶栏 */}
-      <header className="flex h-12 shrink-0 items-center gap-4 border-b border-border bg-panel px-4">
+      <header className="relative flex h-12 shrink-0 items-center gap-4 border-b border-border bg-panel px-4">
         <div className="flex items-baseline gap-2">
           <span className="text-ui-base font-medium">Nexus</span>
           <span className="text-ui-sm text-foreground-subtlest">本地算力监控</span>
@@ -198,6 +212,43 @@ export default function App(): JSX.Element {
         <IconButton title="导出看板为图片" onClick={() => void handleExport()}>
           <ExportIcon />
         </IconButton>
+        <IconButton title="设置" onClick={() => void openSettings()}>
+          <GearIcon />
+        </IconButton>
+        {settingsOpen && (
+          <>
+            <div className="fixed inset-0 z-10" onClick={() => setSettingsOpen(false)} />
+            <div
+              className="nx-fade-in absolute right-3 top-12 z-20 w-72 rounded-xl border border-border bg-card p-4"
+              role="dialog"
+            >
+            <div className="mb-3 text-ui-base font-medium">设置</div>
+            <label className="mb-1 block text-ui-xs text-foreground-subtle">数据保留</label>
+            <select
+              value={retention}
+              onChange={(e) => void changeRetention(Number(e.target.value))}
+              className="h-7 w-full rounded-lg border border-border bg-card px-2 text-ui-base text-foreground"
+            >
+              <option value={0}>永久保留（推荐）</option>
+              <option value={90}>保留 90 天</option>
+              <option value={180}>保留 180 天</option>
+              <option value={365}>保留 365 天</option>
+            </select>
+            <div className="mt-1 text-ui-xs text-foreground-subtlest">
+              清理仅作用于 Nexus 自有库，不改任何 Agent 数据。
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                void nexus.getDataDir().then((dir) => nexus.openPath(dir))
+              }}
+              className="mt-3 h-7 w-full rounded-lg bg-secondary px-2 text-ui-base text-foreground transition-colors duration-150 hover:bg-surface-hover"
+            >
+              打开数据目录
+            </button>
+            </div>
+          </>
+        )}
       </header>
 
       {/* 三栏 */}

@@ -126,6 +126,9 @@ export interface NexusApi {
   syncNow(): Promise<void>
   getSettings(): Promise<Settings>
   setTheme(theme: Settings['theme']): Promise<Settings>
+  getRetentionDays(): Promise<number>
+  setRetentionDays(days: number): Promise<number>
+  getDataDir(): Promise<string>
   exportBoard(): Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>
   openPath(path: string): Promise<void>
   onSyncProgress(cb: (p: SyncProgress) => void): () => void

@@ -83,7 +83,8 @@ export class AntigravityAdapter implements AgentAdapter {
       const rows = db
         .prepare(
           `SELECT conversation_id, title, last_modified_time, workspace_uris, agent_name
-           FROM conversation_summaries WHERE last_modified_time >= ? LIMIT 20000`
+           FROM conversation_summaries WHERE last_modified_time >= ?
+           ORDER BY last_modified_time ASC LIMIT 20000`
         )
         .all(m.sessionCursor) as Array<Record<string, unknown>>
       if (!rows.length) return

@@ -13,6 +13,20 @@ let mainWindow: BrowserWindow | null = null
 let store: NexusStore | null = null
 let sync: SyncService | null = null
 
+/**
+ * 一次性迁移（蓝队 F4）：旧版 codex 适配器用畸形文件名回退 id 落库，
+ * 存量 session_id 与新正则/缓存口径不连续。清空 codex 数据与游标，
+ * 下一次同步自动全量重读（session_meta 给出真实 id）。settings 标记保证只执行一次。
+ */
+function remigrateCodexIfFlagged(store: NexusStore): void {
+  if (store.getSetting('codexRemigratedV2') === '1') return
+  store.db.prepare("DELETE FROM usage_records WHERE agent = 'codex'").run()
+  store.db.prepare("DELETE FROM sessions WHERE agent = 'codex'").run()
+  store.db.prepare("DELETE FROM sync_state WHERE agent = 'codex'").run()
+  store.setSetting('codexRemigratedV2', '1')
+  logger.info('migration.codex_remigrated')
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1600,
@@ -118,6 +132,7 @@ app.whenReady()
   const dbPath = join(app.getPath('userData'), 'nexus.db')
   store = new NexusStore(dbPath)
   logger.info('store.ready', { dbPath })
+  remigrateCodexIfFlagged(store)
 
   const theme = store.getSetting('theme')
   nativeTheme.themeSource = theme === 'light' ? 'light' : 'dark'
