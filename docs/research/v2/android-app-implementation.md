@@ -67,24 +67,32 @@ F:\Nexus\apps\mobile\
 - **控制**：目标选择（DSH 会话下拉 + “新建会话”）→ 文本框下发 `dsh.prompt`
   （不选会话时由 PC 端自动创建，60s 超时）→ `dsh.cancel` 按钮（仅选中会话可用）；
   每次操作在“操作结果”卡显示结果行（时间 + op + ok/err + 摘要）。
-- **设置**：服务器地址/端口/设备名输入（localStorage 持久化）、PIN 配对流程
-  （6 位 PIN → `pair` → 保存 deviceId/token → 自动连接）、已配对凭据展示与清除、
-  连接状态指示灯（绿=在线/橙=进行中/灰=断开/红=错误）+ 重连倒计时提示 + 手动连接/断开。
+- **设置**：服务器地址/端口/设备名输入（localStorage 持久化）、配对流程（粘贴 PC 端二维码内容
+  `nexus-pair://host:port?n=<nonce>&s=<pairingSecret>#<pin>` 自动解析，或手输 PIN / 密钥 s / nonce n
+  → `pair {nonce, proof, pin, deviceName}` → 保存 deviceId 与本地推导 token → 自动连接）、
+  已配对凭据展示与清除、连接状态指示灯（绿=在线/橙=进行中/灰=断开/红=错误）+ 重连倒计时提示 + 手动连接/断开。
 
 ## 4. 连接流程（src/lib/conn.ts）
 
 - 帧格式与 PC 端共用 `@shared/protocol`：请求 `{v:1,type:'req',id,method,payload}`，
   响应 `{v:1,type:'res',id,ok,error?,payload?}`，推送 `{v:1,type:'push',ch,ts,payload}`。
-- **配对**：`pairOnce()` 独立短连接发 `pair {pin, deviceName}` → `{deviceId, token}`，
-  一次性 PIN（60s），成功后凭据写入 localStorage 并自动用长期凭据建连。
-- **鉴权**：每条新连接 open 后先发 `auth {deviceId, token}` → `{capabilities}`；
-  失败分类：UNAUTHORIZED/鉴权类 → 停止自动重连并置 error（等待重新配对）；其他 → 进入退避。
+- **配对（令牌永不上线，红蓝审计 P1-1 修复）**：`pairOnce()` 独立短连接发
+  `pair {nonce, proof=sha256(pairingSecret:nonce:pin), pin, deviceName}` → 响应只含 `{deviceId}`；
+  token 由手机端本地推导 `sha256(pairingSecret:deviceId:nonce)` 后持久化。
+  nonce/pairingSecret/pin 均来自 PC 二维码（摄像头/复制通道交付，不经网络明文）。
+  设置页支持粘贴完整二维码内容自动解析，或手输 PIN / s / n 三项。
+- **鉴权（挑战-应答两步，旧 `auth` 方法已删除）**：连接 open 后先
+  `auth.hello {deviceId}` → `{nonce}`（单次挑战），再
+  `auth.verify {deviceId, proof=sha256(token:nonce)}` → `{deviceId, deviceName, capabilities}`。
+  失败分类：UNAUTHORIZED/鉴权/配对类 → 停止自动重连并置 error（等待重新配对）；其他 → 进入退避。
 - **重连退避**：1s → 2s → 5s → 10s 封顶，鉴权成功清零；断线时 reject 全部在途请求。
 - **请求 Promise map**：客户端生成 id，Map 关联 resolve/reject + 超时定时器（默认 10s，可按调用覆盖）。
 - **订阅缓存**：store 层注册 `agent.overview`、`system.snapshot` 两个通道；
   离线期注册只进缓存，重连鉴权成功后自动重发 `subscribe`；通道无人订阅时发 `unsubscribe`。
 - **状态广播**：conn 用监听器广播 `{status, detail, retryInMs}`，store.ts 桥接进 zustand，
   推送 payload 也统一落 store（页面切换不断流）。
+- **sha256**：使用纯 JS 的 js-sha256（同步 API），不依赖 WebView 的 crypto.subtle
+  （androidScheme=http 下 secure context 行为因 WebView 版本而异）。
 
 ## 5. 契约复用与例外
 
@@ -98,9 +106,12 @@ F:\Nexus\apps\mobile\
 ## 6. Android 工程改动（cap add 之后）
 
 - `android/local.properties`：`sdk.dir=C:/Users/xiaotao2026/AppData/Local/Android/Sdk`（本机 SDK）。
-- `android/app/src/main/AndroidManifest.xml`：`<application>` 增加 `android:usesCleartextTraffic="true"`
-  （允许 ws:// 明文连局域网 PC）。
+- `android/app/src/main/AndroidManifest.xml`：
+  - `<application>` 增加 `android:usesCleartextTraffic="true"`（允许 ws:// 明文连局域网 PC）；
+  - `android:allowBackup="false"`（红蓝审计 P3：防止推导 token 随系统备份导出）。
 - 其余为 Capacitor 模板原样；web 资产更新用 `npm run cap:sync`（vite build + cap sync）。
+- 注意：`dist/` 与 `android/app/src/main/assets/public/` 构建后已删除（Mimosa 拦含 bundle 的提交），
+  复构建请直接跑 `npm run build && npx cap sync android`。
 
 ## 7. 构建产物
 
@@ -110,13 +121,16 @@ F:\Nexus\apps\mobile\
 
 ## 8. 已验证项
 
-1. `npm run build`：tsc --noEmit 0 错误 + vite build 成功（vite 7.3.6，含 Cap 6 降级后的最终依赖集复跑）。
+1. `npm run build`：tsc --noEmit 0 错误 + vite build 成功（vite 7.3.6，协议 v2 改造后复跑）。
 2. `npx cap add android`：成功，android 平台目录生成（Cap 6.2.2）。
-3. `gradlew.bat assembleDebug --no-daemon`：BUILD SUCCESSFUL（82 tasks），app-debug.apk 产出；
-   打包的 web 资产与最终 dist 一致（构建 hash 相同：index-De_5ha3v.js）。
+3. `gradlew.bat assembleDebug --no-daemon`：BUILD SUCCESSFUL，app-debug.apk 产出；
+   协议 v2 重建后 APK 内已含新 bundle（index-CI06DU4X.js，经 unzip 抽查确认）。
 4. 协议面与 PC 端 server.ts（src/main/modules/remote/server.ts）逐 method 对齐：
-   pair/auth/subscribe/agent.overview/agent.byModel/agent.sessions/agent.trend/system.snapshot/
-   zc.instances/dsh.status/dsh.sessions/dsh.prompt/dsh.cancel；推送通道 agent.overview/system.snapshot。
+   pair（nonce+proof+pin+deviceName，响应无 token）/auth.hello/auth.verify（挑战-应答）/
+   subscribe/agent.overview/agent.byModel/agent.sessions/agent.trend/system.snapshot/
+   zc.instances/dsh.status/dsh.sessions/dsh.prompt/dsh.cancel；
+   推送通道 agent.overview/system.snapshot。
+5. sha256 实现抽查：js-sha256('abc') = ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad（与 PC 端 node:crypto 同口径）。
 
 ## 9. 未做项（留待后续）
 

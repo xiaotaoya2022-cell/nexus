@@ -1,4 +1,8 @@
 // 连接层：Nexus 远程协议 v1 客户端（契约见 src/shared/protocol.ts，与 PC 端单一事实源）。
+// - 配对：pair {nonce, proof=sha256(s:n:pin), pin, deviceName} → {deviceId}，
+//   token = sha256(s:deviceId:n) 本地推导，令牌永不上线（红蓝审计 P1-1）
+// - 鉴权：auth.hello {deviceId} → {challenge nonce} → auth.verify {deviceId,
+//   proof=sha256(token:nonce)} → {capabilities}，挑战单次有效
 // - 重连退避 1s/2s/5s/10s 封顶，鉴权成功后清零
 // - 请求 Promise map（id 关联响应 + 超时）
 // - 订阅缓存：断线重连鉴权成功后自动重发 subscribe
@@ -306,14 +310,29 @@ export class NexusConnection {
 
 export const conn = new NexusConnection()
 
-/** 一次性配对：独立短连接，pair {pin, deviceName} → {deviceId, token} */
+/** 配对所需二维码内容（nexus-pair://host:port?n=<nonce>&s=<pairingSecret>#<pin>） */
+export interface PairInput {
+  nonce: string
+  pairingSecret: string
+  pin: string
+  deviceName: string
+}
+
+/** 配对结果：仅 deviceId 上线；token 由双方从二维码内容独立推导（红蓝审计 P1-1） */
+export interface PairedCredentials {
+  deviceId: string
+  /** sha256(pairingSecret:deviceId:nonce)，本地持久化，代替旧 token 字段语义 */
+  token: string
+}
+
+/** 一次性配对：独立短连接。proof = sha256(pairingSecret:nonce:pin) 证明持有二维码内容，
+ * 响应只含 deviceId，token 由本地推导——秘密与令牌均不经网络明文。 */
 export function pairOnce(
   host: string,
   port: string | number,
-  pin: string,
-  deviceName: string,
+  input: PairInput,
   timeoutMs = 10_000
-): Promise<PairResult> {
+): Promise<PairedCredentials> {
   return new Promise((resolve, reject) => {
     let settled = false
     let ws: WebSocket
@@ -323,7 +342,7 @@ export function pairOnce(
       reject(new Error(`地址无效：${err instanceof Error ? err.message : String(err)}`))
       return
     }
-    const finish = (err: Error | null, result?: PairResult) => {
+    const finish = (err: Error | null, result?: PairedCredentials) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
@@ -337,19 +356,33 @@ export function pairOnce(
         /* noop */
       }
       if (err != null) reject(err)
-      else resolve(result as PairResult)
+      else resolve(result as PairedCredentials)
     }
     const timer = setTimeout(() => finish(new Error('配对超时')), timeoutMs)
     ws.onopen = () => {
-      const payload: PairRequest = { pin, deviceName }
+      const payload: PairRequest = {
+        nonce: input.nonce,
+        proof: sha256(`${input.pairingSecret}:${input.nonce}:${input.pin}`),
+        pin: input.pin,
+        deviceName: input.deviceName
+      }
       ws.send(JSON.stringify({ v: 1, type: 'req', id: nextId(), method: 'pair', payload }))
     }
     ws.onmessage = (ev: MessageEvent) => {
       try {
         const frame = JSON.parse(String(ev.data)) as ResponseFrame
         if (frame.type !== 'res') return
-        if (frame.ok) finish(null, frame.payload as PairResult)
-        else finish(new Error(frame.error ?? '配对失败'))
+        if (frame.ok) {
+          const { deviceId } = frame.payload as PairResult
+          if (typeof deviceId !== 'string' || deviceId === '') {
+            finish(new Error('配对响应缺 deviceId'))
+            return
+          }
+          // 双方独立推导 token（与 PC 端 server.ts 同口径）
+          finish(null, { deviceId, token: sha256(`${input.pairingSecret}:${deviceId}:${input.nonce}`) })
+        } else {
+          finish(new Error(frame.error ?? '配对失败'))
+        }
       } catch {
         finish(new Error('响应解析失败'))
       }
@@ -357,4 +390,19 @@ export function pairOnce(
     ws.onclose = () => finish(new Error('连接已关闭'))
     ws.onerror = () => finish(new Error('无法连接服务器'))
   })
+}
+
+/** 解析 PC 端配对二维码内容：nexus-pair://host:port?n=<nonce>&s=<pairingSecret>#<pin> */
+export function parsePairingUri(
+  text: string
+): { host: string; port: string; nonce: string; pairingSecret: string; pin: string } | null {
+  const m = text
+    .trim()
+    .match(/^nexus-pair:\/\/([^:/?#]+):(\d+)\?([^#\s]*)#(\d{6})$/)
+  if (m == null) return null
+  const params = new URLSearchParams(m[3])
+  const nonce = params.get('n')
+  const pairingSecret = params.get('s')
+  if (nonce == null || nonce === '' || pairingSecret == null || pairingSecret === '') return null
+  return { host: m[1], port: m[2], nonce, pairingSecret, pin: m[4] }
 }
