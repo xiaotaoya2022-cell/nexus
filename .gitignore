@@ -21,3 +21,14 @@ Thumbs.db
 
 # TS build artifacts
 *.tsbuildinfo
+
+# Nexus mobile (apps/mobile, Capacitor Android)
+apps/mobile/node_modules/
+apps/mobile/dist/
+apps/mobile/android/.gradle/
+apps/mobile/android/build/
+apps/mobile/android/app/build/
+apps/mobile/android/local.properties
+apps/mobile/android/capacitor-cordova-android-plugins/
+apps/mobile/android/.idea/
+apps/mobile/android/*.iml
