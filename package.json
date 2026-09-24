@@ -1,0 +1,35 @@
+{
+  "name": "nexus",
+  "version": "0.1.0",
+  "description": "Nexus — 本地 AI Agent 算力监控中心：读取本机 AI Agent 的 Token/会话/工具调用数据，汇总为单一桌面看板",
+  "main": "./out/main/index.js",
+  "author": "xiaotaoya2022",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "dist": "electron-vite build && electron-builder --win nsis portable",
+    "dist:dir": "electron-vite build && electron-builder --dir"
+  },
+  "dependencies": {
+    "echarts": "^6.0.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.0",
+    "@types/node": "^22.18.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "electron": "^41.0.3",
+    "electron-builder": "^26.0.0",
+    "electron-vite": "^4.0.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "tailwindcss": "^4.1.0",
+    "typescript": "^5.9.0",
+    "vite": "^7.1.0",
+    "zustand": "^5.0.0"
+  }
+}

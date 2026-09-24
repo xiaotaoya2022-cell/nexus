@@ -1,0 +1,21 @@
+appId: com.xiaotaoya2022.nexus
+productName: Nexus
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**
+  - package.json
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+portable:
+  artifactName: Nexus-Portable-${version}.exe
+npmRebuild: false

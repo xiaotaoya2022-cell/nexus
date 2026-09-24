@@ -1,0 +1,238 @@
+// Nexus 本地存储（aggregator 基础设施层）：node:sqlite（与 ZCode 同款内建驱动，零原生编译）。
+// 库文件位于 Electron userData 目录，Nexus 完全拥有该库，可安全读写。
+// 立项书 §4.3 的三类表：usage_records（原始记录，带 dedupe_key 幂等）/ sessions / sync_state。
+// daily/agent 预聚合表暂不建：单机数据量（<100 万行）下 GROUP BY 实时聚合足够，
+// 避免一致性维护成本（决策记录于 docs/modules/aggregator.md）。
+// 全部 SQL 均为不含用户输入的常量（写入走参数绑定），DDL/事务经 prepare().run() 执行。
+
+import { DatabaseSync } from 'node:sqlite'
+import { mkdirSync } from 'node:fs'
+import { dirname } from 'node:path'
+import type {
+  StoreWriter,
+  UsageRecordInput,
+  SessionRecordInput,
+  ToolCallRecordInput
+} from '@main/modules/adapter/domain/types'
+
+export const TOTAL_EXPR =
+  '(input_tokens + output_tokens + reasoning_tokens + cache_read_tokens + cache_write_tokens)'
+
+const SCHEMA_STATEMENTS: string[] = [
+  `CREATE TABLE IF NOT EXISTS usage_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent TEXT NOT NULL,
+    model TEXT NOT NULL DEFAULT 'unknown',
+    provider TEXT,
+    ts INTEGER NOT NULL,
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+    session_id TEXT,
+    dedupe_key TEXT NOT NULL UNIQUE,
+    is_estimated INTEGER NOT NULL DEFAULT 0
+  )`,
+  'CREATE INDEX IF NOT EXISTS idx_usage_ts ON usage_records(ts)',
+  'CREATE INDEX IF NOT EXISTS idx_usage_agent_ts ON usage_records(agent, ts)',
+  'CREATE INDEX IF NOT EXISTS idx_usage_model ON usage_records(model)',
+  'CREATE INDEX IF NOT EXISTS idx_usage_session ON usage_records(agent, session_id)',
+  `CREATE TABLE IF NOT EXISTS sessions (
+    agent TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    title TEXT,
+    project_dir TEXT,
+    model TEXT,
+    started_at INTEGER,
+    updated_at INTEGER,
+    PRIMARY KEY (agent, session_id)
+  )`,
+  'CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions(updated_at)',
+  `CREATE TABLE IF NOT EXISTS tool_calls (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    ts INTEGER,
+    session_id TEXT,
+    dedupe_key TEXT NOT NULL UNIQUE
+  )`,
+  'CREATE INDEX IF NOT EXISTS idx_tool_ts ON tool_calls(ts)',
+  `CREATE TABLE IF NOT EXISTS sync_state (
+    agent TEXT PRIMARY KEY,
+    last_ts INTEGER NOT NULL DEFAULT 0,
+    meta TEXT,
+    updated_at INTEGER
+  )`,
+  'CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)'
+]
+
+export class NexusStore implements StoreWriter {
+  readonly db: DatabaseSync
+
+  constructor(dbPath: string) {
+    mkdirSync(dirname(dbPath), { recursive: true })
+    this.db = new DatabaseSync(dbPath)
+    this.db.prepare('PRAGMA journal_mode = WAL').get()
+    for (const stmt of SCHEMA_STATEMENTS) this.db.prepare(stmt).run()
+    this.prepareStatements()
+  }
+
+  private stmtUsage!: ReturnType<DatabaseSync['prepare']>
+  private stmtSession!: ReturnType<DatabaseSync['prepare']>
+  private stmtTool!: ReturnType<DatabaseSync['prepare']>
+
+  private prepareStatements(): void {
+    this.stmtUsage = this.db.prepare(`
+      INSERT OR IGNORE INTO usage_records
+        (agent, model, provider, ts, input_tokens, output_tokens, reasoning_tokens,
+         cache_read_tokens, cache_write_tokens, session_id, dedupe_key, is_estimated)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    this.stmtSession = this.db.prepare(`
+      INSERT INTO sessions (agent, session_id, title, project_dir, model, started_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(agent, session_id) DO UPDATE SET
+        title = COALESCE(excluded.title, sessions.title),
+        project_dir = COALESCE(excluded.project_dir, sessions.project_dir),
+        model = COALESCE(excluded.model, sessions.model),
+        started_at = COALESCE(sessions.started_at, excluded.started_at),
+        updated_at = MAX(COALESCE(sessions.updated_at, 0), COALESCE(excluded.updated_at, 0))
+    `)
+    this.stmtTool = this.db.prepare(`
+      INSERT OR IGNORE INTO tool_calls (agent, tool_name, ts, session_id, dedupe_key)
+      VALUES (?, ?, ?, ?, ?)
+    `)
+  }
+
+  private begin(): void {
+    this.db.prepare('BEGIN').run()
+  }
+
+  private commit(): void {
+    this.db.prepare('COMMIT').run()
+  }
+
+  private rollback(): void {
+    this.db.prepare('ROLLBACK').run()
+  }
+
+  insertUsage(rows: UsageRecordInput[]): number {
+    let inserted = 0
+    this.begin()
+    try {
+      for (const r of rows) {
+        const res = this.stmtUsage.run(
+          r.agent,
+          r.model,
+          r.provider ?? null,
+          r.ts,
+          r.inputTokens,
+          r.outputTokens,
+          r.reasoningTokens,
+          r.cacheReadTokens,
+          r.cacheWriteTokens,
+          r.sessionId ?? null,
+          r.dedupeKey,
+          r.isEstimated ? 1 : 0
+        )
+        inserted += Number(res.changes)
+      }
+      this.commit()
+    } catch (err) {
+      this.rollback()
+      throw err
+    }
+    return inserted
+  }
+
+  upsertSessions(rows: SessionRecordInput[]): number {
+    this.begin()
+    try {
+      for (const r of rows) {
+        if (!r.sessionId) continue
+        this.stmtSession.run(
+          r.agent,
+          r.sessionId,
+          r.title ?? null,
+          r.projectDir ?? null,
+          r.model ?? null,
+          r.startedAt ?? null,
+          r.updatedAt ?? null
+        )
+      }
+      this.commit()
+    } catch (err) {
+      this.rollback()
+      throw err
+    }
+    return rows.filter((r) => r.sessionId).length
+  }
+
+  insertToolCalls(rows: ToolCallRecordInput[]): number {
+    let inserted = 0
+    this.begin()
+    try {
+      for (const r of rows) {
+        const res = this.stmtTool.run(
+          r.agent,
+          r.toolName,
+          r.ts ?? null,
+          r.sessionId ?? null,
+          r.dedupeKey
+        )
+        inserted += Number(res.changes)
+      }
+      this.commit()
+    } catch (err) {
+      this.rollback()
+      throw err
+    }
+    return inserted
+  }
+
+  // ── sync_state ──
+  loadSyncState(agent: string): { lastTs: number; meta: Record<string, unknown> } {
+    const row = this.db
+      .prepare('SELECT last_ts, meta FROM sync_state WHERE agent = ?')
+      .get(agent) as { last_ts: number | null; meta: string | null } | undefined
+    if (!row) return { lastTs: 0, meta: {} }
+    let meta: Record<string, unknown> = {}
+    try {
+      meta = row.meta ? (JSON.parse(row.meta) as Record<string, unknown>) : {}
+    } catch {
+      meta = {}
+    }
+    return { lastTs: row.last_ts ?? 0, meta }
+  }
+
+  saveSyncState(agent: string, lastTs: number, meta: Record<string, unknown>): void {
+    this.db
+      .prepare(
+        `INSERT INTO sync_state (agent, last_ts, meta, updated_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(agent) DO UPDATE SET last_ts = excluded.last_ts,
+           meta = excluded.meta, updated_at = excluded.updated_at`
+      )
+      .run(agent, lastTs, JSON.stringify(meta), Date.now())
+  }
+
+  // ── settings ──
+  getSetting(key: string): string | null {
+    const row = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as
+      | { value: string }
+      | undefined
+    return row ? row.value : null
+  }
+
+  setSetting(key: string, value: string): void {
+    this.db
+      .prepare(
+        'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+      )
+      .run(key, value)
+  }
+
+  close(): void {
+    this.db.close()
+  }
+}
