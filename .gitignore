@@ -18,3 +18,6 @@ release/
 # OS
 .DS_Store
 Thumbs.db
+
+# TS build artifacts
+*.tsbuildinfo
