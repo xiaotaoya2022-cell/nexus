@@ -41,8 +41,9 @@ export type PushChannel = 'agent.overview' | 'system.snapshot' | 'alert' | 'dsh.
 /** 远程可调用方法（capability 协商：设备令牌记录允许的 method 集合，v3 插件市场扩展位） */
 export type RemoteMethod =
   // 配对与鉴权（唯二无需令牌的方法）
-  | 'pair' // payload: PairRequest → PairResult
-  | 'auth' // payload: { deviceId: string; token: string } → { ok: true; capabilities: RemoteMethod[] }
+  | 'pair' // payload: PairRequest → { deviceId }（token 由双方按二维码内容独立派生）
+  | 'auth.hello' // payload: { deviceId } → { nonce }（挑战）
+  | 'auth.verify' // payload: AuthVerifyRequest → AuthResult
   // 数据订阅
   | 'subscribe' // payload: { channels: PushChannel[] }
   | 'unsubscribe' // payload: { channels: PushChannel[] }
@@ -69,18 +70,32 @@ export type RemoteMethod =
   | 'device.revoke' // payload: { deviceId: string }
 
 export interface PairRequest {
-  pin: string // 6 位数字 PIN（60s 有效）
+  /** 配对会话 nonce（来自 PC 二维码 nexus-pair://host:port?n=<nonce>&s=<pairingSecret>#<pin>） */
+  nonce: string
+  /** 证明持有二维码内容：sha256(pairingSecret + ':' + nonce + ':' + pin) */
+  proof: string
+  pin: string // 6 位数字 PIN（60s 有效，一次性）
   deviceName: string
 }
 
+/** 配对响应不携带任何秘密：token = sha256(pairingSecret + ':' + deviceId + ':' + nonce)，
+ * 双方各自从二维码内容（pairingSecret/nonce）独立推导，令牌永不上线（红蓝审计 P1-1 修复）。 */
 export interface PairResult {
   deviceId: string
-  token: string // 设备长期令牌（HMAC 校验）
 }
 
-export interface AuthRequest {
+export interface AuthHelloRequest {
   deviceId: string
-  token: string
+}
+
+export interface AuthChallenge {
+  nonce: string
+}
+
+export interface AuthVerifyRequest {
+  deviceId: string
+  /** sha256(token + ':' + nonce)，nonce 为 auth.hello 下发的单次挑战 */
+  proof: string
 }
 
 export interface AuthResult {
@@ -108,6 +123,10 @@ export interface RemoteStatusInfo {
 
 export interface PairingInfo {
   pin: string
+  /** 配对会话 nonce（QR 内 n= 参数） */
+  nonce: string
+  /** 配对预共享密钥（QR 内 s= 参数，经摄像头通道交付，绝不经网络） */
+  pairingSecret: string
   qrDataUrl: string | null
   expiresAt: number
 }

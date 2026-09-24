@@ -51,7 +51,10 @@ async function main(): Promise<void> {
   if (port == null) throw new Error('端口未就绪')
   const pairing = await remote.regeneratePairing()
   const infoPath = join(dir, `nexus-remote-smoke-${process.pid}.json`)
-  writeFileSync(infoPath, JSON.stringify({ port, pin: pairing.pin }))
+  writeFileSync(
+    infoPath,
+    JSON.stringify({ port, pin: pairing.pin, nonce: pairing.nonce, pairingSecret: pairing.pairingSecret })
+  )
   console.log(`[remote-smoke] ready port=${port} info=${infoPath}`)
 
   // 事件驱动等待配对（避免后台定时器节流误判）

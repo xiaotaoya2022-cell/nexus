@@ -30,7 +30,8 @@ const RATE_LIMIT_PER_MIN = 120
 interface DeviceRecord {
   deviceId: string
   name: string
-  tokenHash: string // sha256(token)
+  /** 原始 token（仅存 PC 本机 nexus.db；威胁模型：本机文件读取 = 与使用数据同级失守，审计已接受） */
+  token: string
   createdAt: number
   lastSeenAt: number
 }
@@ -39,7 +40,11 @@ interface ConnState {
   deviceId: string | null
   channels: Set<PushChannel>
   reqTimestamps: number[]
+  authNonce: string | null
 }
+
+const MAX_CONNS = 32
+const MAX_PAIR_FAILURES = 10
 
 export type RemoteStatus = RemoteStatusInfo
 
@@ -78,7 +83,9 @@ export class RemoteServer {
   private enabled = false
   private pin: string | null = null
   private pinExpiresAt = 0
-  private pairNonce = randomBytes(8).toString('hex')
+  private pairNonce = randomBytes(16).toString('hex')
+  private pairingSecret: string | null = null
+  private pairFailures = 0
   private conns = new Map<WebSocket, ConnState>()
   private pushTimer: NodeJS.Timeout | null = null
   private lastConnOpenAt = 0
@@ -86,7 +93,7 @@ export class RemoteServer {
 
   constructor(
     private readonly deps: Deps,
-    private readonly secret: string // settings 持久化的服务端密钥
+    private readonly _secret: string // 保留位：token 已改为二维码配对密钥派生（P1-1），不再依赖服务端 secret
   ) {
     this.auditPath = join(deps.userDataDir, 'remote-audit.jsonl')
   }
@@ -118,7 +125,17 @@ export class RemoteServer {
     if (this.wss) return
     this.enabled = true
     this.deps.store.setSetting('remoteEnabled', '1')
-    this.wss = new WebSocketServer({ host: '0.0.0.0', port: 0 }) // 随机端口（草案 §端口）
+    // 红蓝审计 P2-2：maxPayload 收紧到 256KB（帧上限在协议层之前生效）；
+    // 浏览器发起的跨站 WS（带 http/https Origin）在握手期直接拒绝
+    this.wss = new WebSocketServer({
+      host: '0.0.0.0',
+      port: 0,
+      maxPayload: MAX_FRAME_BYTES,
+      verifyClient: (info) => {
+        const origin = info.req.headers.origin
+        return origin == null || !/^https?:\/\//i.test(String(origin))
+      }
+    })
     this.wss.on('listening', () => {
       const addr = this.wss?.address()
       this.port = typeof addr === 'object' && addr ? addr.port : null
@@ -143,28 +160,33 @@ export class RemoteServer {
     logger.info('remote.stopped')
   }
 
-  private newPin(): string {
-    this.pin = String(randomInt(0, 1_000_000)).padStart(6, '0')
+  /** 生成新配对会话：QR 内含 pairingSecret（经摄像头通道交付，绝不经网络传输）。
+   * token = sha256(pairingSecret:deviceId:nonce)，由两端独立推导，令牌永不上线（P1-1 修复）。 */
+  async regeneratePairing(): Promise<{
+    pin: string
+    nonce: string
+    pairingSecret: string
+    qrDataUrl: string | null
+    expiresAt: number
+  }> {
+    const pin = String(randomInt(0, 1_000_000)).padStart(6, '0')
+    this.pairNonce = randomBytes(16).toString('hex')
+    this.pairingSecret = randomBytes(32).toString('hex')
+    this.pin = pin
     this.pinExpiresAt = Date.now() + PAIR_PIN_TTL_MS
-    this.pairNonce = randomBytes(8).toString('hex')
-    return this.pin
-  }
-
-  /** 生成新配对 PIN，返回 QR 内容（nexus-pair://host:port?n=nonce） */
-  async regeneratePairing(): Promise<{ pin: string; qrDataUrl: string | null; expiresAt: number }> {
-    const pin = this.newPin()
+    this.pairFailures = 0
     let qr: string | null = null
     try {
       const qrLib = await import('qrcode')
       const host = await this.lanIp()
-      qr = await qrLib.toDataURL(`nexus-pair://${host}:${this.port ?? 0}?n=${this.pairNonce}#${pin}`, {
-        margin: 1,
-        width: 240
-      })
+      qr = await qrLib.toDataURL(
+        `nexus-pair://${host}:${this.port ?? 0}?n=${this.pairNonce}&s=${this.pairingSecret}#${pin}`,
+        { margin: 1, width: 240 }
+      )
     } catch (err) {
       logger.warn('remote.qr_failed', { error: err instanceof Error ? err.message : String(err) })
     }
-    return { pin, qrDataUrl: qr, expiresAt: this.pinExpiresAt }
+    return { pin, nonce: this.pairNonce, pairingSecret: this.pairingSecret, qrDataUrl: qr, expiresAt: this.pinExpiresAt }
   }
 
   private async lanIp(): Promise<string> {
@@ -186,7 +208,7 @@ export class RemoteServer {
       qrDataUrl: null, // QR 仅在 regeneratePairing 时生成（含 PIN，不常驻内存）
       pairingActive: pinActive,
       pairExpiresAt: pinActive ? this.pinExpiresAt : null,
-      devices: this.loadDevices().map(({ tokenHash: _t, ...rest }) => rest)
+      devices: this.loadDevices().map(({ token: _t, ...rest }) => rest)
     }
   }
 
@@ -200,7 +222,12 @@ export class RemoteServer {
 
   // ── 连接处理 ──
   private onConnection(ws: WebSocket): void {
-    const state: ConnState = { deviceId: null, channels: new Set(), reqTimestamps: [] }
+    // 红蓝审计 P2-1：并发连接上限
+    if (this.conns.size >= MAX_CONNS) {
+      ws.close()
+      return
+    }
+    const state: ConnState = { deviceId: null, channels: new Set(), reqTimestamps: [], authNonce: null }
     this.conns.set(ws, state)
     this.lastConnOpenAt = Date.now()
     // eslint-disable-next-line no-console
@@ -259,8 +286,13 @@ export class RemoteServer {
 
   private async handleReq(ws: WebSocket, state: ConnState, frame: RequestFrame): Promise<void> {
     const method = frame.method
-    // 未鉴权只允许 pair / auth
-    if (state.deviceId == null && method !== 'pair' && method !== 'auth') {
+    // 未鉴权只允许 pair / auth.hello / auth.verify
+    if (
+      state.deviceId == null &&
+      method !== 'pair' &&
+      method !== 'auth.hello' &&
+      method !== 'auth.verify'
+    ) {
       this.sendErr(ws, frame.id, 'UNAUTHORIZED', '请先配对或鉴权')
       return
     }
@@ -268,8 +300,10 @@ export class RemoteServer {
       switch (method) {
         case 'pair':
           return this.handlePair(ws, state, frame)
-        case 'auth':
-          return this.handleAuth(ws, state, frame)
+        case 'auth.hello':
+          return this.handleAuthHello(ws, state, frame)
+        case 'auth.verify':
+          return this.handleAuthVerify(ws, state, frame)
         case 'subscribe':
         case 'unsubscribe': {
           const channels = (frame.payload as { channels?: PushChannel[] })?.channels ?? []
@@ -299,7 +333,8 @@ export class RemoteServer {
         }
         case 'agent.sessions': {
           const range = this.rangeOf(frame.payload)
-          const limit = Number((frame.payload as { limit?: number })?.limit ?? 50)
+          const rawLimit = Number((frame.payload as { limit?: number })?.limit ?? 50)
+          const limit = Number.isFinite(rawLimit) ? rawLimit : 50
           this.send(ws, {
             v: 1,
             type: 'res',
@@ -356,7 +391,7 @@ export class RemoteServer {
           return
         }
         case 'device.list': {
-          this.send(ws, { v: 1, type: 'res', id: frame.id, ok: true, payload: this.loadDevices().map(({ tokenHash: _t, ...rest }) => rest) })
+          this.send(ws, { v: 1, type: 'res', id: frame.id, ok: true, payload: this.loadDevices().map(({ token: _t, ...rest }) => rest) })
           return
         }
         case 'device.revoke': {
@@ -379,60 +414,103 @@ export class RemoteServer {
     return r === 'today' || r === '7d' || r === '30d' || r === 'month' || r === 'year' || r === 'all' ? r : '7d'
   }
 
+  /** 配对（红蓝审计 P1-1 修复）：令牌永不上线。
+   * 客户端从二维码获得 pairingSecret/nonce/PIN（摄像头通道，不经网络），
+   * 证明 = sha256(pairingSecret:nonce:pin)；token = sha256(pairingSecret:deviceId:nonce)
+   * 由两端独立推导。失败预算：累计 ≥MAX_PAIR_FAILURES 次作废当前配对会话。 */
   private handlePair(ws: WebSocket, state: ConnState, frame: RequestFrame): void {
     const p = frame.payload as Partial<PairRequest>
-    const pinOk =
+    const active =
       this.pin != null &&
+      this.pairingSecret != null &&
       Date.now() < this.pinExpiresAt &&
-      typeof p.pin === 'string' &&
-      p.pin.length === 6 &&
-      timingSafeEqual(Buffer.from(p.pin), Buffer.from(this.pin))
-    if (!pinOk) {
-      this.audit('unpaired', 'pair', false, 'PIN 无效或过期')
-      this.sendErr(ws, frame.id, 'UNAUTHORIZED', 'PIN 无效或已过期')
+      typeof p.nonce === 'string' &&
+      p.nonce === this.pairNonce
+    const proofOk =
+      active &&
+      typeof p.proof === 'string' &&
+      p.proof.length === 64 &&
+      timingSafeEqual(
+        Buffer.from(createHash('sha256').update(`${this.pairingSecret}:${p.nonce}:${p.pin}`).digest('hex')),
+        Buffer.from(p.proof)
+      )
+    const pinOk =
+      active && typeof p.pin === 'string' && p.pin.length === 6 && timingSafeEqual(Buffer.from(p.pin), Buffer.from(this.pin))
+    if (!proofOk || !pinOk) {
+      this.pairFailures += 1
+      this.audit('unpaired', 'pair', false, `证明或 PIN 无效（失败 ${this.pairFailures}）`)
+      if (this.pairFailures >= MAX_PAIR_FAILURES) {
+        // 失败预算耗尽：作废当前配对会话，需重新生成二维码
+        this.pin = null
+        this.pairingSecret = null
+        this.pinExpiresAt = 0
+      }
+      this.sendErr(ws, frame.id, 'UNAUTHORIZED', '配对证明无效或已过期')
       return
     }
     const deviceName = typeof p.deviceName === 'string' && p.deviceName.trim() ? p.deviceName.trim().slice(0, 40) : 'device'
     const deviceId = `dev_${randomBytes(6).toString('hex')}`
-    const token = createHmac('sha256', this.secret).update(deviceId).digest('hex') + randomBytes(16).toString('hex')
+    const nonce = String(p.nonce)
+    const token = createHash('sha256').update(`${String(this.pairingSecret)}:${deviceId}:${nonce}`).digest('hex')
     const devices = this.loadDevices()
     devices.push({
       deviceId,
       name: deviceName,
-      tokenHash: createHash('sha256').update(token).digest('hex'),
+      token,
       createdAt: Date.now(),
       lastSeenAt: Date.now()
     })
     this.saveDevices(devices)
     state.deviceId = deviceId
     this.audit(deviceId, 'pair', true, deviceName)
-    this.send(ws, { v: 1, type: 'res', id: frame.id, ok: true, payload: { deviceId, token } })
-    // 一次性 PIN：配对成功即失效
+    // 响应仅含 deviceId——token 双方各自推导，永不上线
+    this.send(ws, { v: 1, type: 'res', id: frame.id, ok: true, payload: { deviceId } })
+    // 一次性配对会话：成功即失效
     this.pin = null
+    this.pairingSecret = null
     this.pinExpiresAt = 0
+    this.pairFailures = 0
     this.deps.onPaired?.(deviceId, deviceName)
   }
 
-  private handleAuth(ws: WebSocket, state: ConnState, frame: RequestFrame): void {
-    const p = frame.payload as Partial<{ deviceId: string; token: string }>
+  /** 鉴权挑战：为指定设备下发单次 nonce */
+  private handleAuthHello(ws: WebSocket, state: ConnState, frame: RequestFrame): void {
+    const p = frame.payload as Partial<{ deviceId: string }>
     const device = this.loadDevices().find((d) => d.deviceId === p.deviceId)
-    if (!device || typeof p.token !== 'string' || p.token.length < 32) {
-      this.audit(String(p.deviceId ?? '?'), 'auth', false, '设备不存在或 token 缺失')
+    if (!device) {
+      this.audit(String(p.deviceId ?? '?'), 'auth.hello', false, '设备不存在')
+      this.sendErr(ws, frame.id, 'UNAUTHORIZED', '设备未配对')
+      return
+    }
+    const nonce = randomBytes(16).toString('hex')
+    state.authNonce = nonce
+    this.send(ws, { v: 1, type: 'res', id: frame.id, ok: true, payload: { nonce } })
+  }
+
+  /** 鉴权校验：proof = sha256(token:nonce)，nonce 单次有效（防重放） */
+  private handleAuthVerify(ws: WebSocket, state: ConnState, frame: RequestFrame): void {
+    const p = frame.payload as Partial<{ deviceId: string; proof: string }>
+    const device = this.loadDevices().find((d) => d.deviceId === p.deviceId)
+    const expectedNonce = state.authNonce
+    state.authNonce = null // 单次挑战
+    if (!device || typeof p.proof !== 'string' || p.proof.length !== 64 || expectedNonce == null) {
+      this.audit(String(p.deviceId ?? '?'), 'auth.verify', false, '设备/证明/挑战缺失')
       this.sendErr(ws, frame.id, 'UNAUTHORIZED', '鉴权失败')
       return
     }
-    const hash = createHash('sha256').update(p.token).digest('hex')
-    const expected = Buffer.from(device.tokenHash, 'hex')
-    const given = Buffer.from(hash, 'hex')
-    if (expected.length !== given.length || !timingSafeEqual(expected, given)) {
-      this.audit(device.deviceId, 'auth', false, 'token 不匹配')
+    const expected = createHash('sha256').update(`${device.token}:${expectedNonce}`).digest('hex')
+    const ok =
+      expected.length === p.proof.length &&
+      timingSafeEqual(Buffer.from(expected), Buffer.from(p.proof))
+    if (!ok) {
+      this.audit(device.deviceId, 'auth.verify', false, '证明不匹配')
       this.sendErr(ws, frame.id, 'UNAUTHORIZED', '鉴权失败')
       return
     }
     state.deviceId = device.deviceId
     device.lastSeenAt = Date.now()
     this.saveDevices(this.loadDevices().map((d) => (d.deviceId === device.deviceId ? device : d)))
-    this.audit(device.deviceId, 'auth', true)
+    this.audit(device.deviceId, 'auth.verify', true)
     this.send(ws, {
       v: 1,
       type: 'res',
