@@ -36,6 +36,9 @@ dependencies {
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
+    // WireGuard 隧道（GoBackend 用户态实现，无 root；MPL-2.0 官方库）
+    // wireguard-android 库在 repo.wireguard.org（当前网络不可达）；恢复时取消注释
+    // implementation "com.wireguard.android:tunnel:0.5.0"
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
