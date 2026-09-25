@@ -1,19 +1,24 @@
 // CodeBuddy CN 平台集成。证据：cockpit-tools src-tauri/src/modules/codebuddy_cn_oauth.rs
-// - 端点: POST {CODEBUDDY_API_ENDPOINT=https://www.codebuddy.cn}/v2/billing/meter/get-user-resource
+// - 配额: POST {ENDPOINT=https://www.codebuddy.cn}/v2/billing/meter/get-user-resource
 //   （:899 post_user_resource；头: Authorization Bearer + X-User-Id(可选)）
-// - 请求体: build_user_resource_request_body（PageNumber/PageSize/ProductCode=p_tcaca/Status=[0,3]/
-//   PackageEndTimeRangeBegin=now/End=now+365*101 天，本地时间 "YYYY-MM-DD HH:mm:ss"）
-// - 解析: data.resources | data.data.resources | data.Response.Data.Accounts ...
+//   body: PageNumber/PageSize/ProductCode=p_tcaca/Status=[0,3]/PackageEndTimeRange*
+//   解析: data.resources | data.data.resources | data.Response.Data.Accounts ...
 //   （user_resource_items :883），字段 CycleCapacitySize/Remain/Used/PackageName/CycleResetTime
-// 凭据：官方 IDE 的登录态存腾讯云端/加密存储，本地无明文 token（调研报告 §四）——
-// 本地导入暂返回 []，待 Nexus 应用内 OAuth（device/网页流程）接入后即生效。
+// - 登录: POST /v2/plugin/auth/state?platform=ide（:173-190，头 X-No-Authorization 等）
+//   → data.state + auth_url → 打开浏览器 → 轮询 GET /v2/plugin/auth/token?state=
+//   （:275 complete_login，1.5s 间隔 :16），响应 data.accessToken/uid/email/refreshToken
+// 凭据：官方 IDE 登录态存云端/加密存储，本地无明文 token → 本地导入返回 []，走应用内 OAuth。
 
-import type { DiscoveredCredential, PlatformIntegration, PlatformQuota } from '../types'
+import { shell } from 'electron'
+import type { DiscoveredCredential, OAuthSession, PlatformIntegration, PlatformQuota } from '../types'
 import { QuotaAuthError } from '../types'
 import type { QuotaWindow } from '@shared/quotas'
 import { fetchJson, parseTimeLoose, pickNumber, pickString } from '../http'
 
 const ENDPOINT = 'https://www.codebuddy.cn'
+const API_PREFIX = '/v2/plugin'
+const LOGIN_POLL_MS = 1500
+const LOGIN_TIMEOUT_MS = 5 * 60_000
 
 interface ResourceAccount {
   PackageName?: string
@@ -57,8 +62,52 @@ export const integration: PlatformIntegration = {
 
   async discoverLocalCredentials(): Promise<DiscoveredCredential[]> {
     // 官方 IDE 登录态在云端/加密存储（调研报告 §四），本地无明文凭据可导入。
-    // 应用内 OAuth 接入后此函数保持 []，凭据由 engine 的 OAuth 会话提供。
+    // 凭据由 engine 的 OAuth 会话提供（oauthLogin）。
     return []
+  },
+
+  /** 应用内 OAuth（cockpit codebuddy_cn_oauth.rs：auth/state → 浏览器 → 轮询 auth/token）。 */
+  async oauthLogin(): Promise<OAuthSession> {
+    // 1) auth/state：拿 state 与登录页 URL（:173-230）
+    const stateRes = await fetchJson(`${ENDPOINT}${API_PREFIX}/auth/state?platform=ide`, {
+      method: 'POST',
+      headers: {
+        'X-No-Authorization': 'true',
+        'X-No-User-Id': 'true',
+        'X-No-Enterprise-Id': 'true',
+        'X-No-Department-Info': 'true'
+      },
+      body: JSON.stringify({})
+    })
+    if (stateRes.status !== 200) throw new Error(`auth/state 返回 ${stateRes.status}`)
+    const stateData = (stateRes.body as { data?: Record<string, unknown> })?.data
+    const state = typeof stateData?.state === 'string' ? stateData.state : null
+    const authUrl =
+      pickString(stateData, ['auth_url', 'url', 'authUrl']) ??
+      pickString(stateData, ['loginUrl', 'login_url'])
+    if (!state || !authUrl) throw new Error('auth/state 响应缺少 state/auth_url')
+    await shell.openExternal(authUrl)
+
+    // 2) 轮询 auth/token 直到完成（complete_login :275，1.5s 间隔）
+    const deadline = Date.now() + LOGIN_TIMEOUT_MS
+    for (;;) {
+      if (Date.now() > deadline) throw new Error('CodeBuddy CN 登录超时（5 分钟）')
+      await new Promise((r) => setTimeout(r, LOGIN_POLL_MS))
+      const tokenRes = await fetchJson(`${ENDPOINT}${API_PREFIX}/auth/token?state=${encodeURIComponent(state)}`)
+      if (tokenRes.status !== 200) continue // 未完成/瞬态错误继续轮询
+      const data = (tokenRes.body as { data?: Record<string, unknown> })?.data
+      const accessToken = pickString(data, ['accessToken']) ?? pickString(data, ['access_token']) ?? null
+      if (!accessToken) continue
+      const uid = pickString(data, ['uid', 'userId', 'user_id'])
+      const email = pickString(data, ['email'])
+      return {
+        accountId: uid ?? email ?? 'codebuddy-cn',
+        label: email ?? uid ?? 'CodeBuddy CN 账号',
+        accessToken,
+        refreshToken: pickString(data, ['refreshToken', 'refresh_token']) ?? undefined,
+        expiresAt: null
+      } satisfies OAuthSession
+    }
   },
 
   async fetchQuota(cred: DiscoveredCredential): Promise<PlatformQuota> {

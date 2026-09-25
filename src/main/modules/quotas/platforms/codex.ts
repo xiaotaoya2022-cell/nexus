@@ -1,19 +1,33 @@
-// Codex 平台集成。证据：cockpit-tools crates/cockpit-core/src/modules/codex_quota.rs
-// - 端点: USAGE_URL = https://chatgpt.com/backend-api/wham/usage (codex_quota.rs:10)
-// - 头: Authorization Bearer + 可选 ChatGPT-Account-Id (codex_quota.rs:141-170)
-// - 解析: plan_type + rate_limit.primary_window/secondary_window
-//        (WindowInfo: used_percent / reset_at / reset_after_seconds, codex_quota.rs struct 段)
-// 凭据来源：~/.codex/auth.json（Codex CLI 本地登录；本机为 API Key 模式——
-// wham/usage 需订阅 OAuth token，API Key 会被上游 401 → 引擎显示需 OAuth 登录）。
+// Codex 平台集成。证据：cockpit-tools crates/cockpit-core/src/modules/codex_quota.rs + codex_oauth.rs
+// - 配额: USAGE_URL = https://chatgpt.com/backend-api/wham/usage (codex_quota.rs:10)
+//   Bearer + 可选 ChatGPT-Account-Id 头（codex_quota.rs:141-170）
+//   解析: plan_type + rate_limit.primary_window/secondary_window
+//   (WindowInfo: used_percent / reset_at / reset_after_seconds)
+// - OAuth: CLIENT_ID app_EMoamEEZ73f0CkXaXp7hrann（codex_oauth.rs:16）
+//   authorize https://auth.openai.com/oauth/authorize（:17）、
+//   令牌交换 https://auth.openai.com/oauth/token（:18，grant_type
+//   authorization_code/refresh_token，响应 id_token/access_token/refresh_token :908-928）
+//   SCOPES（:19）、PKCE S256（:123）、回环 http://localhost:<port>/auth/callback（:603）
+// 凭据来源：~/.codex/auth.json（CLI 本地登录）与应用内 OAuth 会话。
 
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { DiscoveredCredential, PlatformIntegration, PlatformQuota } from '../types'
+import type { DiscoveredCredential, OAuthSession, PlatformIntegration, PlatformQuota } from '../types'
 import { QuotaAuthError } from '../types'
 import type { QuotaWindow } from '@shared/quotas'
 import { clampPercent, fetchJson, jwtPayload, parseTimeLoose, readJsonFile } from '../http'
+import { base64urlToken, runLoopbackOAuth, s256Challenge } from '../oauth'
 
 const USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage'
+
+// OAuth 端点与参数（cockpit codex_oauth.rs:16-19；公开客户端 ID，非秘密）
+const OAUTH = {
+  clientId: 'app_EMoamEEZ73f0CkXaXp7hrann',
+  authorize: 'https://auth.openai.com/oauth/authorize',
+  tokenExchange: 'https://auth.openai.com/oauth/token',
+  scopes: 'openid profile email offline_access api.connectors.read api.connectors.invoke',
+  originator: 'Codex Desktop'
+} as const
 
 interface CodexWindowRaw {
   used_percent?: number
@@ -92,6 +106,75 @@ export const integration: PlatformIntegration = {
       // 容错：未安装 Codex / 文件不可读
     }
     return creds
+  },
+
+  /** 应用内 OAuth（PKCE + 回环回调，cockpit codex_oauth.rs 流程）。
+   * 注意：~/.codex/auth.json 若已有 OAuth tokens，本地导入即可用，无需再登录。 */
+  async oauthLogin(): Promise<OAuthSession> {
+    const verifier = base64urlToken()
+    const challenge = s256Challenge(verifier)
+    const state = base64urlToken()
+    const { code, redirectUri } = await runLoopbackOAuth({
+      redirectUriBase: 'http://localhost:0/auth/callback',
+      expectedState: state,
+      buildAuthUrl: (redirectUri) =>
+        // build_auth_url（codex_oauth.rs:543-554）
+        `${OAUTH.authorize}?response_type=code&client_id=${OAUTH.clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(OAUTH.scopes)}&code_challenge=${challenge}&code_challenge_method=S256&id_token_add_organizations=true&codex_cli_simplified_flow=true&state=${state}&originator=${encodeURIComponent(OAUTH.originator)}`
+    })
+    // 令牌交换（exchange_code_for_token_internal：form 表单，含 client_id）
+    const form = new URLSearchParams({
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: redirectUri,
+      client_id: OAUTH.clientId,
+      code_verifier: verifier
+    })
+    const { status, body } = await fetchJson(OAUTH.tokenExchange, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+      body: form.toString()
+    })
+    if (status !== 200) throw new Error(`令牌交换失败 status=${status}`)
+    const tokens = body as Record<string, unknown>
+    const accessToken = typeof tokens.access_token === 'string' ? tokens.access_token : null
+    if (!accessToken) throw new Error('令牌响应缺少 access_token')
+    const payload = jwtPayload(accessToken)
+    const authClaim = payload?.['https://api.openai.com/auth'] as Record<string, unknown> | undefined
+    const accountId =
+      (typeof authClaim?.chatgpt_account_id === 'string' ? authClaim.chatgpt_account_id : null) ??
+      (typeof payload?.sub === 'string' ? payload.sub : 'codex-oauth')
+    const email = typeof payload?.email === 'string' ? payload.email : 'Codex 账号'
+    return {
+      accountId,
+      label: email,
+      accessToken,
+      refreshToken: typeof tokens.refresh_token === 'string' ? tokens.refresh_token : undefined,
+      expiresAt: null
+    }
+  },
+
+  /** 刷新令牌（grant_type=refresh_token，cockpit codex_oauth.rs 刷新分支） */
+  async refreshCredential(cred: DiscoveredCredential): Promise<DiscoveredCredential> {
+    if (!cred.refreshToken) throw new QuotaAuthError('无 refresh_token，请重新登录')
+    const form = new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: cred.refreshToken,
+      client_id: OAUTH.clientId
+    })
+    const { status, body } = await fetchJson(OAUTH.tokenExchange, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+      body: form.toString()
+    })
+    if (status !== 200) throw new QuotaAuthError(`刷新失败 status=${status}`)
+    const tokens = body as Record<string, unknown>
+    const accessToken = typeof tokens.access_token === 'string' ? tokens.access_token : null
+    if (!accessToken) throw new QuotaAuthError('刷新响应缺少 access_token')
+    return {
+      ...cred,
+      accessToken,
+      refreshToken: typeof tokens.refresh_token === 'string' ? tokens.refresh_token : cred.refreshToken
+    }
   },
 
   async fetchQuota(cred: DiscoveredCredential): Promise<PlatformQuota> {

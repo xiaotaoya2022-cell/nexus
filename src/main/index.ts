@@ -1,6 +1,6 @@
 // Nexus 主进程入口：创建窗口、装配各模块（依赖注入）、启动同步循环。
 
-import { app, BrowserWindow, nativeTheme } from 'electron'
+import { app, BrowserWindow, nativeTheme, Notification } from 'electron'
 import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 import { NexusStore } from './modules/aggregator/infrastructure/store'
@@ -102,7 +102,14 @@ function createWindow(): void {
                     out.push({ tag: el.tagName, text: (el.textContent || '').slice(0, 24), bg: cs.backgroundColor, class: el.className.slice(0, 60), selected: sel ? sel.containsNode(el, true) : false })
                   }
                 })
-                return { sel: sel ? sel.toString().slice(0, 80) : null, count: out.length, items: out.slice(0, 12) }
+                const filtered = document.body.innerText.includes('已筛选')
+                return {
+                  filtered,
+                  localStorage: JSON.stringify(localStorage),
+                  sel: sel ? sel.toString().slice(0, 80) : null,
+                  count: out.length,
+                  items: out.slice(0, 12)
+                }
               })()`,
               true
             )
@@ -159,6 +166,14 @@ app.whenReady()
       mainWindow.webContents.send('nexus:quota-update', views)
     }
     remote.broadcastPush('quota', views)
+  }, (alert) => {
+    // 系统通知 + 远程告警通道
+    try {
+      new Notification({ title: alert.title, body: alert.body }).show()
+    } catch {
+      // 通知失败不影响主流程
+    }
+    remote.broadcastPush('alert', alert)
   })
   quota.registerIntegrations(PLATFORM_INTEGRATIONS)
   let remoteSecret = store.getSetting('remoteSecret')

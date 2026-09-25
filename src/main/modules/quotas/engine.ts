@@ -8,6 +8,7 @@ import type {
   PlatformMetaView
 } from '@shared/quotas'
 import type { DiscoveredCredential, OAuthSession, PlatformIntegration } from './types'
+import { QuotaAuthError } from './types'
 import { logger } from '@main/modules/shared/logger'
 
 const AUTH_FILE = 'quotas-auth.json'
@@ -31,10 +32,13 @@ export class QuotaEngine {
   private views: Record<string, AccountQuotaView[]> = {}
   private pollTimer: NodeJS.Timeout | null = null
   private refreshing = false
+  /** 告警去重：account:window → 上次告警时间（6h 内不重复） */
+  private lastAlertAt = new Map<string, number>()
 
   constructor(
     private readonly userDataDir: string,
-    private readonly onUpdate?: (views: AccountQuotaView[]) => void
+    private readonly onUpdate?: (views: AccountQuotaView[]) => void,
+    private readonly onAlert?: (alert: { level: 'warn' | 'error'; title: string; body: string }) => void
   ) {
     this.views = this.loadCache().views ?? EMPTY_VIEWS
   }
@@ -197,8 +201,9 @@ export class QuotaEngine {
         fetchedAt: Date.now()
       }
       try {
-        const quota = await integration.fetchQuota(cred)
+        const quota = await this.fetchWithRefresh(integration, cred, platformId)
         views.push({ ...base, planLabel: quota.planLabel, windows: quota.windows, extra: quota.extra })
+        this.checkAlerts(base, quota.windows)
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         logger.warn('quota.fetch_failed', { platform: platformId, error: message })
@@ -207,6 +212,58 @@ export class QuotaEngine {
     }
     this.views[platformId] = views
     this.saveCache()
+  }
+
+  /** 拉配额；401/403 且有 refresh 能力时刷新凭据重试一次，并回写 OAuth 会话。 */
+  private async fetchWithRefresh(
+    integration: PlatformIntegration,
+    cred: DiscoveredCredential,
+    platformId: string
+  ) {
+    try {
+      return await integration.fetchQuota(cred)
+    } catch (err) {
+      const isAuth =
+        err instanceof QuotaAuthError &&
+        typeof integration.refreshCredential === 'function' &&
+        !!cred.refreshToken
+      if (!isAuth) throw err
+      const refreshed = await integration.refreshCredential!(cred)
+      const quota = await integration.fetchQuota(refreshed)
+      if (cred.source === 'nexus-oauth') {
+        const auth = this.loadAuth()
+        auth.sessions[platformId] = (auth.sessions[platformId] ?? []).map((s) =>
+          s.accountId === cred.accountId
+            ? {
+                ...s,
+                accessToken: refreshed.accessToken ?? s.accessToken,
+                refreshToken: refreshed.refreshToken ?? s.refreshToken
+              }
+            : s
+        )
+        this.saveAuth(auth)
+      }
+      return quota
+    }
+  }
+
+  /** 阈值告警（≥90% warn、100% error），同账号同窗口 6h 内不重复。 */
+  private checkAlerts(base: AccountQuotaView, windows: { label: string; usedPercent: number | null }[]): void {
+    for (const w of windows) {
+      const used = w.usedPercent
+      if (used == null) continue
+      const level: 'warn' | 'error' | null = used >= 100 ? 'error' : used >= 90 ? 'warn' : null
+      if (!level) continue
+      const key = `${base.platform}:${base.accountId}:${w.label}`
+      const last = this.lastAlertAt.get(key) ?? 0
+      if (Date.now() - last < 6 * 3600_000) continue
+      this.lastAlertAt.set(key, Date.now())
+      this.onAlert?.({
+        level,
+        title: `${base.platformLabel} 配额告警`,
+        body: `${base.label} 的「${w.label}」已用 ${used}%${used >= 100 ? '（已用尽）' : ''}`
+      })
+    }
   }
 
   // ── 轮询 ──
