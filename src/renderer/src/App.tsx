@@ -10,6 +10,7 @@ import { EChart } from './charts/EChart'
 import { AgentSidebar } from './components/AgentSidebar'
 import { SessionsPanel } from './components/SessionsPanel'
 import { SystemCard } from './components/SystemCard'
+import { AnimatedNumber } from './components/RollingNumber'
 import {
   ChartCard,
   EmptyState,
@@ -345,22 +346,28 @@ export default function App(): JSX.Element {
               <div className="grid grid-cols-2 gap-4 2xl:grid-cols-4">
                 <KpiCard
                   label="Token 消耗"
-                  value={compactNumber(totalTokens)}
+                  value={<AnimatedNumber num={totalTokens} />}
                   sub={`${fullNumber(totalTokens)} tokens · ${data.overview.totals.requests} 次请求`}
                 />
                 <KpiCard
                   label="活跃会话"
-                  value={fullNumber(data.overview.sessionCount)}
+                  value={<AnimatedNumber num={data.overview.sessionCount} />}
                   sub={`涉及 ${data.overview.activeModels} 个模型`}
                 />
                 <KpiCard
                   label="工具调用"
-                  value={fullNumber(data.overview.toolCallCount)}
+                  value={<AnimatedNumber num={data.overview.toolCallCount} />}
                   sub={data.tools.length ? `最高频 ${data.tools[0].tool}` : '范围内无记录'}
                 />
                 <KpiCard
                   label="估算成本"
-                  value={formatCost(data.overview.totals.estimatedCostUsd)}
+                  value={
+                    <AnimatedNumber
+                      num={data.overview.totals.estimatedCostUsd}
+                      compactFormat={formatCost}
+                      fullFormat={(n) => `$${n.toFixed(4)}`}
+                    />
+                  }
                   sub="按公开牌价折算，仅供参考"
                 />
               </div>

@@ -72,14 +72,15 @@ export function agentColorMap(names: string[], tokens: ChartTokens): Map<string,
 /** Y 轴按可见峰值统一单位（全 B 或全 M…），避免 B/M 混排误读 */
 function fixedUnitFormatter(points: Array<{ total: number }>): (v: number) => string {
   const max = Math.max(1, ...points.map((p) => p.total))
+  // 中文数量级（与 compactNumber 同口径）
   const units: Array<[string, number]> = [
-    ['B', 1e9],
-    ['M', 1e6],
-    ['K', 1e3],
+    ['万亿', 1e12],
+    ['亿', 1e8],
+    ['万', 1e4],
     ['', 1]
   ]
   const unit = units.find(([, d]) => max >= d) ?? ['', 1]
-  return (v) => (unit[1] === 1 ? String(Math.round(v)) : `${(v / unit[1]).toFixed(2)}${unit[0]}`)
+  return (v) => (unit[1] === 1 ? String(Math.round(v)) : `${(v / unit[1]).toFixed(1)}${unit[0]}`)
 }
 
 // ── 趋势折线 ──
