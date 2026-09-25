@@ -161,7 +161,7 @@ app.whenReady()
   const zcode = new ZcodeManager()
   const dsh = new DshBridge()
   const cockpit = new CockpitBridge()
-  const quota = new QuotaEngine(app.getPath('userData'), (views) => {
+  const quota = new QuotaEngine(app.getPath('userData'), (key) => store?.getSetting(key) ?? null, (views) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('nexus:quota-update', views)
     }

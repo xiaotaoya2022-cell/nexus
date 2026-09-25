@@ -37,6 +37,7 @@ export class QuotaEngine {
 
   constructor(
     private readonly userDataDir: string,
+    private readonly depsStoreSetting: (key: string) => string | null,
     private readonly onUpdate?: (views: AccountQuotaView[]) => void,
     private readonly onAlert?: (alert: { level: 'warn' | 'error'; title: string; body: string }) => void
   ) {
@@ -247,12 +248,14 @@ export class QuotaEngine {
     }
   }
 
-  /** 阈值告警（≥90% warn、100% error），同账号同窗口 6h 内不重复。 */
+  /** 阈值告警（settings.quotaAlertThreshold，默认 90；≥100 固定 error），同账号同窗口 6h 内不重复。 */
   private checkAlerts(base: AccountQuotaView, windows: { label: string; usedPercent: number | null }[]): void {
+    const thresholdRaw = Number(this.depsStoreSetting('quotaAlertThreshold') ?? 90)
+    const threshold = Number.isFinite(thresholdRaw) && thresholdRaw > 0 ? thresholdRaw : 90
     for (const w of windows) {
       const used = w.usedPercent
       if (used == null) continue
-      const level: 'warn' | 'error' | null = used >= 100 ? 'error' : used >= 90 ? 'warn' : null
+      const level: 'warn' | 'error' | null = used >= 100 ? 'error' : used >= threshold ? 'warn' : null
       if (!level) continue
       const key = `${base.platform}:${base.accountId}:${w.label}`
       const last = this.lastAlertAt.get(key) ?? 0

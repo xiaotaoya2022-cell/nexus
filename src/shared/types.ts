@@ -139,6 +139,8 @@ export interface NexusApi {
   quotaLogin(platform: string): Promise<void>
   quotaLogout(platform: string, accountId: string): Promise<void>
   quotaRefresh(): Promise<import('./quotas').AccountQuotaView[]>
+  getQuotaAlertThreshold(): Promise<number>
+  setQuotaAlertThreshold(percent: number): Promise<number>
   onQuotaUpdate(cb: (views: import('./quotas').AccountQuotaView[]) => void): () => void
   exportBoard(): Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>
   openPath(path: string): Promise<void>

@@ -59,6 +59,7 @@ export default function App(): JSX.Element {
   const [remoteStatus, setRemoteStatus] = useState<Awaited<ReturnType<typeof nexus.getRemoteStatus>> | null>(null)
   const [pairing, setPairing] = useState<Awaited<ReturnType<typeof nexus.regeneratePairing>> | null>(null)
   const [quotaPlatforms, setQuotaPlatforms] = useState<Awaited<ReturnType<typeof nexus.quotaPlatforms>>>([])
+  const [quotaAlert, setQuotaAlert] = useState(90)
 
   // 启动时读取主题设置
   useEffect(() => {
@@ -122,6 +123,7 @@ export default function App(): JSX.Element {
       setRemoteStatus(s)
       setRemoteOn(s.enabled)
       setQuotaPlatforms(await nexus.quotaPlatforms())
+      setQuotaAlert(await nexus.getQuotaAlertThreshold())
     }
     setSettingsOpen((v) => !v)
   }
@@ -300,6 +302,25 @@ export default function App(): JSX.Element {
             )}
             <div className="mt-1 text-ui-xs text-foreground-subtlest">
               Cursor / Codex CLI 的本机登录态会自动导入；其余平台登录能力陆续接入。
+            </div>
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <span className="text-ui-xs text-foreground-subtle">配额告警阈值</span>
+              <select
+                value={quotaAlert}
+                onChange={(e) => {
+                  const v = Number(e.target.value)
+                  void nexus.setQuotaAlertThreshold(v).then((nv) => {
+                    setQuotaAlert(nv)
+                    setToast(`配额告警阈值设为 ${nv}%`)
+                  })
+                }}
+                className="h-6 rounded-lg border border-border bg-card px-1.5 text-ui-xs text-foreground"
+              >
+                <option value={70}>70%</option>
+                <option value={80}>80%</option>
+                <option value={90}>90%（默认）</option>
+                <option value={95}>95%</option>
+              </select>
             </div>
 
             <div className="my-3 h-px bg-hairline" />

@@ -33,6 +33,8 @@ const api: NexusApi = {
   quotaLogout: (platform: string, accountId: string) =>
     ipcRenderer.invoke('nexus:quotaLogout', platform, accountId),
   quotaRefresh: () => ipcRenderer.invoke('nexus:quotaRefresh'),
+  getQuotaAlertThreshold: () => ipcRenderer.invoke('nexus:getQuotaAlertThreshold'),
+  setQuotaAlertThreshold: (percent: number) => ipcRenderer.invoke('nexus:setQuotaAlertThreshold', percent),
   onQuotaUpdate: (cb: (views: import('@shared/quotas').AccountQuotaView[]) => void) => {
     const listener = (_e: unknown, views: unknown): void => cb(views as import('@shared/quotas').AccountQuotaView[])
     ipcRenderer.on('nexus:quota-update', listener)

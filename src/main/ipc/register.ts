@@ -228,6 +228,15 @@ export function registerIpc(deps: IpcDeps): void {
     }
   })
   ipcMain.handle('nexus:quotaRefresh', async () => deps.quota.refreshNow())
+  ipcMain.handle('nexus:getQuotaAlertThreshold', (): number => {
+    const v = Number(deps.store.getSetting('quotaAlertThreshold') ?? 90)
+    return Number.isFinite(v) && v > 0 ? v : 90
+  })
+  ipcMain.handle('nexus:setQuotaAlertThreshold', (_e, percent: number): number => {
+    const normalized = Number.isFinite(percent) && percent > 0 ? Math.min(99, Math.round(percent)) : 90
+    deps.store.setSetting('quotaAlertThreshold', String(normalized))
+    return normalized
+  })
 
   ipcMain.handle('nexus:exportBoard', async () => {
     const win = deps.getMainWindow()
