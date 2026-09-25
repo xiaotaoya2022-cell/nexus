@@ -16,6 +16,7 @@ nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: always
+  include: build/installer.nsh
 portable:
   artifactName: Nexus-Portable-${version}.exe
 npmRebuild: false
