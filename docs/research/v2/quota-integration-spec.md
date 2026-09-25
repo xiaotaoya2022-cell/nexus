@@ -49,3 +49,27 @@ UI：看板「账号配额」卡（订阅推送实时更新）+ 设置「账号�
 2. **Qoder 实机验证**：DPAPI 本地读取已实现（secret://aicoding.auth.creditUsage），本机无 state.vscdb；装有 Qoder 并登录的机器上自动生效。
 3. **Antigravity CloudCode 多步流程**：需 cockpit 凭据（加密信封）或自建 OAuth，暂以会话元数据 + Cockpit 网关提示覆盖。
 4. Qoder openapi 配额窗口字段（token 已有效，待官方暴露）。
+
+
+## 附：手机端 VPN 内嵌（wireguard-android 源码集成）状态与步骤
+
+> 状态：源码已拉取（gh-proxy 镜像 → WireGuard/wireguard-android master，tunnel 模块
+> 位于 apps/mobile/wireguard-android-src/tunnel/，已 gitignore）；依赖声明/服务类/Manifest
+> 三处骨架就位但**禁用**（见 apps/mobile 内注释）。
+> 本机被墙点：repo.wireguard.org（库 maven 仓）已绕开（源码集成），但
+> **CMake 构建 libwg-go.so 需要 NDK + CMake + Go 拉取 wireguard-go 依赖**（go proxy 可达）。
+
+集成步骤（下一批专做）：
+1. settings.gradle：include ':tunnel'；gradle.properties：wireguardPackageName=app.nexus.mobile。
+2. 根 build.gradle：tunnel 模块用 version catalog（libs.plugins.android.library）——需把
+   wireguard-android-src/gradle/ 与 libs.versions.toml 合并进主工程，或把模块改写为
+   传统 build.gradle（去除 version catalog 依赖，工作量小）。
+3. 安装 NDK + CMake（Android Studio SDK Manager 或 sdkmanager "ndk;26.x" "cmake;3.22"）。
+4. 恢复 app 依赖：implementation project(':tunnel')（替换注释掉的 maven 依赖行）。
+5. 恢复 NexusVpnService.kt（.disabled → .kt）与 Manifest service 声明（注释已就位）。
+6. PC 侧：sidecar 增加 WireGuard 服务端（golang.zx2c4.com/wireguard 或 tailscaled
+   wg-listen），生成服务器/客户端密钥对，Nexus 设置面板下发手机配置（私钥/PC公钥/端点）。
+7. apk 构建：cd apps/mobile/android && gradlew assembleDebug（CMake 首次构建 libwg-go 约 5-10 分钟）。
+
+注意：tunnel 模块 build.gradle.kts 要求 compileSdk 36 + AGP 兼容（当前主工程 AGP 8.2.1 /
+compileSdk 34）——要么升级主工程 compileSdk 至 36，要么将模块 compileSdk 降至 34（源码兼容性待验证）。
