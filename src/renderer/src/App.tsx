@@ -361,6 +361,30 @@ export default function App(): JSX.Element {
                     </span>
                   </div>
                 )}
+                {pairing && pairing.addresses.length > 0 && (
+                  <div className="mt-2 flex flex-col gap-1">
+                    <div className="text-ui-xs text-foreground-subtle">按网络选地址，复制配对串到手机粘贴：</div>
+                    {pairing.addresses.map((a) => (
+                      <div key={a.host} className="flex items-center gap-2">
+                        <span className="min-w-0 flex-1 truncate text-ui-xs text-foreground-subtlest" title={a.uri}>
+                          <span className="text-foreground-subtle">{a.label}</span> · {a.host}:{remoteStatus?.port ?? ''}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void navigator.clipboard.writeText(a.uri).then(() => setToast('配对串已复制，粘贴到手机端设置页'))
+                          }}
+                          className="shrink-0 rounded-md px-1.5 py-0.5 text-ui-xs text-foreground-subtle transition-colors duration-150 hover:bg-hover hover:text-foreground"
+                        >
+                          复制
+                        </button>
+                      </div>
+                    ))}
+                    <div className="text-ui-xs text-foreground-subtlest">
+                      跨网（不同 Wi-Fi/流量）请用 Tailscale/虚拟网 地址；手机需已登录同一 Tailscale 网络。
+                    </div>
+                  </div>
+                )}
                 {remoteStatus && remoteStatus.devices.length > 0 && (
                   <div className="mt-2">
                     <div className="mb-1 text-ui-xs text-foreground-subtle">已配对设备</div>

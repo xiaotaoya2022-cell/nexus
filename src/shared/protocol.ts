@@ -121,12 +121,22 @@ export interface RemoteStatusInfo {
   devices: DeviceInfo[]
 }
 
+export interface PairingAddress {
+  host: string
+  /** 网段标注：局域网 / Tailscale/虚拟网（跨网用）/ 其他网络 */
+  label: string
+  /** 完整配对串 nexus-pair://host:port?n=&s=#pin（手机端直接粘贴） */
+  uri: string
+}
+
 export interface PairingInfo {
   pin: string
   /** 配对会话 nonce（QR 内 n= 参数） */
   nonce: string
   /** 配对预共享密钥（QR 内 s= 参数，经摄像头通道交付，绝不经网络） */
   pairingSecret: string
+  /** 全部候选地址（含 Tailscale 100.x），跨网时选 Tailscale 条目 */
+  addresses: PairingAddress[]
   qrDataUrl: string | null
   expiresAt: number
 }

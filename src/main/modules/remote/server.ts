@@ -166,6 +166,7 @@ export class RemoteServer {
     pin: string
     nonce: string
     pairingSecret: string
+    addresses: Array<{ host: string; label: string; uri: string }>
     qrDataUrl: string | null
     expiresAt: number
   }> {
@@ -175,29 +176,53 @@ export class RemoteServer {
     this.pin = pin
     this.pinExpiresAt = Date.now() + PAIR_PIN_TTL_MS
     this.pairFailures = 0
+    // 候选地址：全部非环回 IPv4（局域网 + Tailscale 100.x 等虚拟网卡），跨网时选 Tailscale 地址
+    const addresses = this.candidateAddresses()
+    const buildUri = (host: string): string =>
+      `nexus-pair://${host}:${this.port ?? 0}?n=${this.pairNonce}&s=${this.pairingSecret}#${pin}`
+    const addressList = addresses.map((a) => ({ ...a, uri: buildUri(a.host) }))
     let qr: string | null = null
     try {
       const qrLib = await import('qrcode')
-      const host = await this.lanIp()
-      qr = await qrLib.toDataURL(
-        `nexus-pair://${host}:${this.port ?? 0}?n=${this.pairNonce}&s=${this.pairingSecret}#${pin}`,
-        { margin: 1, width: 240 }
-      )
+      const primary = addressList[0]
+      qr = await qrLib.toDataURL(primary ? primary.uri : buildUri('127.0.0.1'), {
+        margin: 1,
+        width: 240
+      })
     } catch (err) {
       logger.warn('remote.qr_failed', { error: err instanceof Error ? err.message : String(err) })
     }
-    return { pin, nonce: this.pairNonce, pairingSecret: this.pairingSecret, qrDataUrl: qr, expiresAt: this.pinExpiresAt }
+    return {
+      pin,
+      nonce: this.pairNonce,
+      pairingSecret: this.pairingSecret,
+      addresses: addressList,
+      qrDataUrl: qr,
+      expiresAt: this.pinExpiresAt
+    }
   }
 
-  private async lanIp(): Promise<string> {
-    const osInfo = await import('node:os')
-    const ifaces = osInfo.networkInterfaces()
-    for (const list of Object.values(ifaces)) {
+  /** 全部非环回 IPv4 候选（标注网段类型；Tailscale = 100.64/10 CGNAT 段） */
+  private candidateAddresses(): Array<{ host: string; label: string }> {
+    const osInfo = require('node:os') as typeof import('node:os')
+    const out: Array<{ host: string; label: string }> = []
+    const seen = new Set<string>()
+    for (const list of Object.values(osInfo.networkInterfaces())) {
       for (const ni of list ?? []) {
-        if (ni.family === 'IPv4' && !ni.internal) return ni.address
+        if (ni.family !== 'IPv4' || ni.internal) continue
+        const ip = ni.address
+        if (seen.has(ip)) continue
+        seen.add(ip)
+        const label = ip.startsWith('100.')
+          ? 'Tailscale/虚拟网（跨网用）'
+          : ip.startsWith('192.168.') || ip.startsWith('10.') || ip.startsWith('172.')
+            ? '局域网'
+            : '其他网络'
+        out.push({ host: ip, label })
       }
     }
-    return '127.0.0.1'
+    // Tailscale/虚拟网排前，跨网场景优先
+    return out.sort((a, b) => Number(b.label.includes('Tailscale')) - Number(a.label.includes('Tailscale')))
   }
 
   status(): RemoteStatus {
