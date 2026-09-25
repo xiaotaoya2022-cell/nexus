@@ -12,6 +12,7 @@ import type { AgentInfo } from '@shared/types'
 import type { SystemCollector } from '../modules/system/collector'
 import type { ZcodeManager } from '../modules/zcode/manager'
 import type { DshBridge } from '../modules/dsh/bridge'
+import type { CockpitBridge } from '../modules/cockpit/bridge'
 import type { RemoteServer } from '../modules/remote/server'
 import { rangeStartMs } from '../modules/aggregator/application/query-service'
 
@@ -27,6 +28,7 @@ export interface IpcDeps {
   system: SystemCollector
   zcode: ZcodeManager
   dsh: DshBridge
+  cockpit: CockpitBridge
   remote: RemoteServer
   getMainWindow: () => BrowserWindow | null
 }
@@ -98,6 +100,9 @@ function buildAgentInfos(deps: IpcDeps): AgentInfo[] {
   for (const [id, meta] of known) {
     const adapter = deps.adapters.find((a) => a.id === id)
     const detected = adapter ? adapter.detect() : detectPresence(deps.presence.find((p) => p.id === id)?.detectPaths ?? [])
+    // Antigravity：接入 Cockpit 感知——把"如何启用采集"写进 note（调研报告 §落地建议）
+    const cockpitNote = id === 'antigravity' ? deps.cockpit.noteFor() : null
+    const note = cockpitNote ?? (detected ? meta.note : null)
     const today = todayByAgent.get(id)
     const act = activity.get(id)
     const so = sessionOnly.get(id)
@@ -118,7 +123,7 @@ function buildAgentInfos(deps: IpcDeps): AgentInfo[] {
       todayRequests: today?.requests ?? 0,
       lastActivityAt: last,
       sessionCount: sessions,
-      note: detected ? meta.note : null
+      note,
     })
   }
   // 有数据的排前，其余按名称

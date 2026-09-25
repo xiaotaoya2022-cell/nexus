@@ -10,6 +10,7 @@ import { QueryService } from './modules/aggregator/application/query-service'
 import { SystemCollector } from './modules/system/collector'
 import { ZcodeManager } from './modules/zcode/manager'
 import { DshBridge } from './modules/dsh/bridge'
+import { CockpitBridge } from './modules/cockpit/bridge'
 import { RemoteServer } from './modules/remote/server'
 import { registerIpc, broadcastSyncProgress } from './ipc/register'
 import { logger } from './modules/shared/logger'
@@ -150,6 +151,7 @@ app.whenReady()
   const system = new SystemCollector()
   const zcode = new ZcodeManager()
   const dsh = new DshBridge()
+  const cockpit = new CockpitBridge()
   let remoteSecret = store.getSetting('remoteSecret')
   if (!remoteSecret) {
     remoteSecret = randomBytes(32).toString('hex')
@@ -160,7 +162,7 @@ app.whenReady()
     remoteSecret
   )
 
-  registerIpc({ store, query, sync, adapters, presence: PRESENCE_ONLY_AGENTS, system, zcode, dsh, remote, getMainWindow: () => mainWindow })
+  registerIpc({ store, query, sync, adapters, presence: PRESENCE_ONLY_AGENTS, system, zcode, dsh, cockpit, remote, getMainWindow: () => mainWindow })
 
   if (store.getSetting('remoteEnabled') === '1') {
     remote.start()
