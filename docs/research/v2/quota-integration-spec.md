@@ -45,7 +45,7 @@ UI：看板「账号配额」卡（订阅推送实时更新）+ 设置「账号�
 
 ## 下一批
 
-1. Qoder：设备码登录（openapi.qoder.sh deviceauth 流程）+ DPAPI secret storage 读取路线评估。
-2. Trae/WorkBuddy：配额端点在 cockpit 源码中的精确定位（grow.trae.ai / copilot.tencent.com 已知域名）。
-3. Antigravity CloudCode 多步配额流程移植。
-4. 配额告警阈值可配置（settings.quotaAlertThreshold）。
+1. **Trae 配额读取（代码就绪待数据）**：凭据/配额在 Trae IDE state.vscdb（键 iCubeAuthInfo://icube.cloudide / iCubeEntitlementInfo://icube.cloudide，trae_account_core_platform_storage.rs:24-28），DPAPI 链助手已落地（quotas/dpapi.ts：Local State os_crypt → PowerShell ProtectedData → AES-256-GCM v10）——本机 Trae 未留 state.vscdb，装 Trae 并登录后按 Qoder 同款接入。
+2. **Qoder 实机验证**：DPAPI 本地读取已实现（secret://aicoding.auth.creditUsage），本机无 state.vscdb；装有 Qoder 并登录的机器上自动生效。
+3. **Antigravity CloudCode 多步流程**：需 cockpit 凭据（加密信封）或自建 OAuth，暂以会话元数据 + Cockpit 网关提示覆盖。
+4. Qoder openapi 配额窗口字段（token 已有效，待官方暴露）。
