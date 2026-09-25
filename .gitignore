@@ -32,3 +32,8 @@ apps/mobile/android/local.properties
 apps/mobile/android/capacitor-cordova-android-plugins/
 apps/mobile/android/.idea/
 apps/mobile/android/*.iml
+
+# tailscale sidecar 构建产物
+sidecars/tailscale-sidecar/nexus-tailscale.exe
+sidecars/tailscale-sidecar/tailscaled.state
+sidecars/tailscale-sidecar/*.log
