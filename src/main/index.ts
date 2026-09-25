@@ -11,6 +11,8 @@ import { SystemCollector } from './modules/system/collector'
 import { ZcodeManager } from './modules/zcode/manager'
 import { DshBridge } from './modules/dsh/bridge'
 import { CockpitBridge } from './modules/cockpit/bridge'
+import { QuotaEngine } from './modules/quotas/engine'
+import { PLATFORM_INTEGRATIONS } from './modules/quotas/platforms/registry'
 import { RemoteServer } from './modules/remote/server'
 import { registerIpc, broadcastSyncProgress } from './ipc/register'
 import { logger } from './modules/shared/logger'
@@ -152,6 +154,13 @@ app.whenReady()
   const zcode = new ZcodeManager()
   const dsh = new DshBridge()
   const cockpit = new CockpitBridge()
+  const quota = new QuotaEngine(app.getPath('userData'), (views) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('nexus:quota-update', views)
+    }
+    remote.broadcastPush('quota', views)
+  })
+  quota.registerIntegrations(PLATFORM_INTEGRATIONS)
   let remoteSecret = store.getSetting('remoteSecret')
   if (!remoteSecret) {
     remoteSecret = randomBytes(32).toString('hex')
@@ -162,7 +171,9 @@ app.whenReady()
     remoteSecret
   )
 
-  registerIpc({ store, query, sync, adapters, presence: PRESENCE_ONLY_AGENTS, system, zcode, dsh, cockpit, remote, getMainWindow: () => mainWindow })
+  registerIpc({ store, query, sync, adapters, presence: PRESENCE_ONLY_AGENTS, system, zcode, dsh, cockpit, quota, remote, getMainWindow: () => mainWindow })
+
+  quota.startPolling()
 
   if (store.getSetting('remoteEnabled') === '1') {
     remote.start()

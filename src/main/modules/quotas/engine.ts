@@ -1,0 +1,228 @@
+// 配额引擎：平台注册、凭据存储（仅应用内 OAuth 会话）、轮询调度、缓存与视图。
+// 红线：本地导入凭据只在内存使用不落库；token 永不进入视图/缓存/日志。
+
+import { readFileSync, writeFileSync, existsSync, chmodSync } from 'node:fs'
+import { join } from 'node:path'
+import type {
+  AccountQuotaView,
+  PlatformMetaView
+} from '@shared/quotas'
+import type { DiscoveredCredential, OAuthSession, PlatformIntegration } from './types'
+import { logger } from '@main/modules/shared/logger'
+
+const AUTH_FILE = 'quotas-auth.json'
+const CACHE_FILE = 'quotas-cache.json'
+const POLL_MS = 5 * 60_000
+
+interface StoredAuth {
+  version: 1
+  sessions: Record<string, OAuthSession[]> // platform → sessions（应用内 OAuth 登录的才持久化）
+}
+
+interface StoredCache {
+  version: 1
+  views: Record<string, AccountQuotaView[]> // platform → views（无凭据字段，可安全落盘）
+}
+
+const EMPTY_VIEWS: Record<string, AccountQuotaView[]> = {}
+
+export class QuotaEngine {
+  private integrations: PlatformIntegration[] = []
+  private views: Record<string, AccountQuotaView[]> = {}
+  private pollTimer: NodeJS.Timeout | null = null
+  private refreshing = false
+
+  constructor(
+    private readonly userDataDir: string,
+    private readonly onUpdate?: (views: AccountQuotaView[]) => void
+  ) {
+    this.views = this.loadCache().views ?? EMPTY_VIEWS
+  }
+
+  registerIntegrations(list: PlatformIntegration[]): void {
+    this.integrations = list
+  }
+
+  // ── 持久化 ──
+  private authPath(): string {
+    return join(this.userDataDir, AUTH_FILE)
+  }
+
+  private loadAuth(): StoredAuth {
+    try {
+      if (!existsSync(this.authPath())) return { version: 1, sessions: {} }
+      const parsed = JSON.parse(readFileSync(this.authPath(), 'utf8')) as StoredAuth
+      return parsed.version === 1 && parsed.sessions ? parsed : { version: 1, sessions: {} }
+    } catch {
+      return { version: 1, sessions: {} }
+    }
+  }
+
+  private saveAuth(auth: StoredAuth): void {
+    try {
+      writeFileSync(this.authPath(), JSON.stringify(auth), { encoding: 'utf8' })
+      try {
+        chmodSync(this.authPath(), 0o600)
+      } catch {
+        // Windows 上 chmod 语义有限，尽力而为
+      }
+    } catch (err) {
+      logger.error('quota.auth_save_failed', { error: err instanceof Error ? err.message : String(err) })
+    }
+  }
+
+  private cachePath(): string {
+    return join(this.userDataDir, CACHE_FILE)
+  }
+
+  private loadCache(): { version: 1; views: Record<string, AccountQuotaView[]> } {
+    try {
+      if (!existsSync(this.cachePath())) return { version: 1, views: {} }
+      const parsed = JSON.parse(readFileSync(this.cachePath(), 'utf8')) as StoredCache
+      return parsed.version === 1 && parsed.views ? parsed : { version: 1, views: {} }
+    } catch {
+      return { version: 1, views: {} }
+    }
+  }
+
+  private saveCache(): void {
+    try {
+      writeFileSync(this.cachePath(), JSON.stringify({ version: 1, views: this.views } satisfies StoredCache), 'utf8')
+    } catch {
+      // 缓存写失败不影响内存视图
+    }
+    // 通知渲染层/远程订阅方（视图不含凭据，可安全推送）
+    this.onUpdate?.(this.listAccounts())
+  }
+
+  // ── 查询 ──
+  listPlatformMeta(): PlatformMetaView[] {
+    const auth = this.loadAuth()
+    return this.integrations.map((p) => ({
+      id: p.id,
+      label: p.label,
+      oauthSupported: typeof p.oauthLogin === 'function',
+      accountCount: (auth.sessions[p.id]?.length ?? 0) + (this.views[p.id]?.length ?? 0)
+    }))
+  }
+
+  listAccounts(): AccountQuotaView[] {
+    return Object.values(this.views).flat()
+  }
+
+  // ── 登录/登出 ──
+  async login(platformId: string): Promise<void> {
+    const integration = this.integrations.find((p) => p.id === platformId)
+    if (!integration?.oauthLogin) throw new Error('该平台未支持应用内登录，请先在对应 Agent 内登录后自动导入')
+    const session = await integration.oauthLogin()
+    const auth = this.loadAuth()
+    const list = auth.sessions[platformId] ?? []
+    const filtered = list.filter((s) => s.accountId !== session.accountId)
+    auth.sessions[platformId] = [...filtered, session]
+    this.saveAuth(auth)
+    logger.info('quota.login', { platform: platformId, account: session.accountId })
+    await this.refreshPlatform(platformId)
+  }
+
+  logout(platformId: string, accountId: string): void {
+    const auth = this.loadAuth()
+    auth.sessions[platformId] = (auth.sessions[platformId] ?? []).filter((s) => s.accountId !== accountId)
+    this.saveAuth(auth)
+    this.views[platformId] = (this.views[platformId] ?? []).filter(
+      (v) => !(v.source === 'oauth' && v.accountId === accountId)
+    )
+    this.saveCache()
+  }
+
+  // ── 刷新 ──
+  async refreshNow(): Promise<AccountQuotaView[]> {
+    if (this.refreshing) return this.listAccounts()
+    this.refreshing = true
+    try {
+      for (const integration of this.integrations) {
+        await this.refreshPlatform(integration.id)
+      }
+    } finally {
+      this.refreshing = false
+    }
+    return this.listAccounts()
+  }
+
+  private async toCredential(session: OAuthSession): Promise<DiscoveredCredential> {
+    return {
+      kind: 'oauth',
+      accessToken: session.accessToken,
+      refreshToken: session.refreshToken,
+      accountId: session.accountId,
+      label: session.label,
+      source: 'nexus-oauth',
+      expiresAt: session.expiresAt
+    }
+  }
+
+  private async refreshPlatform(platformId: string): Promise<void> {
+    const integration = this.integrations.find((p) => p.id === platformId)
+    if (!integration) return
+    const auth = this.loadAuth()
+    const oauthSessions = auth.sessions[platformId] ?? []
+    let localCreds: DiscoveredCredential[] = []
+    try {
+      localCreds = await integration.discoverLocalCredentials()
+    } catch (err) {
+      logger.warn('quota.discover_failed', {
+        platform: platformId,
+        error: err instanceof Error ? err.message : String(err)
+      })
+    }
+    // 本地导入凭据去重：按 accountId+source
+    const seen = new Set(oauthSessions.map((s) => s.accountId))
+    const creds: DiscoveredCredential[] = [
+      ...(await Promise.all(oauthSessions.map((s) => this.toCredential(s)))),
+      ...localCreds.filter((c) => c.accountId == null || !seen.has(c.accountId))
+    ]
+    if (creds.length === 0) {
+      delete this.views[platformId]
+      this.saveCache()
+      return
+    }
+    const views: AccountQuotaView[] = []
+    for (const cred of creds) {
+      const base: AccountQuotaView = {
+        platform: platformId,
+        platformLabel: integration.label,
+        accountId: cred.accountId ?? cred.label,
+        label: cred.label,
+        source: cred.kind === 'oauth' && cred.source === 'nexus-oauth' ? 'oauth' : 'local',
+        windows: [],
+        fetchedAt: Date.now()
+      }
+      try {
+        const quota = await integration.fetchQuota(cred)
+        views.push({ ...base, planLabel: quota.planLabel, windows: quota.windows, extra: quota.extra })
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        logger.warn('quota.fetch_failed', { platform: platformId, error: message })
+        views.push({ ...base, windows: [], error: message })
+      }
+    }
+    this.views[platformId] = views
+    this.saveCache()
+  }
+
+  // ── 轮询 ──
+  startPolling(): void {
+    if (this.pollTimer) return
+    this.pollTimer = setInterval(() => {
+      void this.refreshNow().catch(() => {})
+    }, POLL_MS)
+    // 首轮延迟 3s，避免与启动同步抢 IO
+    setTimeout(() => {
+      void this.refreshNow().catch(() => {})
+    }, 3000)
+  }
+
+  stopPolling(): void {
+    if (this.pollTimer) clearInterval(this.pollTimer)
+    this.pollTimer = null
+  }
+}

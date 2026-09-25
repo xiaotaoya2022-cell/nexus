@@ -13,6 +13,7 @@ import type { SystemCollector } from '../modules/system/collector'
 import type { ZcodeManager } from '../modules/zcode/manager'
 import type { DshBridge } from '../modules/dsh/bridge'
 import type { CockpitBridge } from '../modules/cockpit/bridge'
+import type { QuotaEngine } from '../modules/quotas/engine'
 import type { RemoteServer } from '../modules/remote/server'
 import { rangeStartMs } from '../modules/aggregator/application/query-service'
 
@@ -29,6 +30,7 @@ export interface IpcDeps {
   zcode: ZcodeManager
   dsh: DshBridge
   cockpit: CockpitBridge
+  quota: QuotaEngine
   remote: RemoteServer
   getMainWindow: () => BrowserWindow | null
 }
@@ -211,6 +213,21 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle('nexus:revokeDevice', (_e, deviceId: string) => {
     if (typeof deviceId === 'string' && deviceId.startsWith('dev_')) deps.remote.revokeDevice(deviceId)
   })
+
+  // ── v2：账号与配额 ──
+  ipcMain.handle('nexus:quotaPlatforms', () => deps.quota.listPlatformMeta())
+  ipcMain.handle('nexus:quotaAccounts', () => deps.quota.listAccounts())
+  ipcMain.handle('nexus:quotaLogin', async (_e, platform: string) => {
+    if (typeof platform === 'string' && /^[a-z0-9-]{1,32}$/.test(platform)) {
+      await deps.quota.login(platform)
+    }
+  })
+  ipcMain.handle('nexus:quotaLogout', (_e, platform: string, accountId: string) => {
+    if (typeof platform === 'string' && typeof accountId === 'string') {
+      deps.quota.logout(platform, accountId)
+    }
+  })
+  ipcMain.handle('nexus:quotaRefresh', async () => deps.quota.refreshNow())
 
   ipcMain.handle('nexus:exportBoard', async () => {
     const win = deps.getMainWindow()

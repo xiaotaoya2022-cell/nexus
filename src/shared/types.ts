@@ -134,6 +134,12 @@ export interface NexusApi {
   regeneratePairing(): Promise<import('./protocol').PairingInfo>
   setRemoteEnabled(enabled: boolean): Promise<void>
   revokeDevice(deviceId: string): Promise<void>
+  quotaPlatforms(): Promise<import('./quotas').PlatformMetaView[]>
+  quotaAccounts(): Promise<import('./quotas').AccountQuotaView[]>
+  quotaLogin(platform: string): Promise<void>
+  quotaLogout(platform: string, accountId: string): Promise<void>
+  quotaRefresh(): Promise<import('./quotas').AccountQuotaView[]>
+  onQuotaUpdate(cb: (views: import('./quotas').AccountQuotaView[]) => void): () => void
   exportBoard(): Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>
   openPath(path: string): Promise<void>
   onSyncProgress(cb: (p: SyncProgress) => void): () => void

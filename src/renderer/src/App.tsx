@@ -10,6 +10,7 @@ import { EChart } from './charts/EChart'
 import { AgentSidebar } from './components/AgentSidebar'
 import { SessionsPanel } from './components/SessionsPanel'
 import { SystemCard } from './components/SystemCard'
+import { QuotaCard } from './components/QuotaCard'
 import { AnimatedNumber } from './components/RollingNumber'
 import {
   ChartCard,
@@ -57,6 +58,7 @@ export default function App(): JSX.Element {
   const [remoteOn, setRemoteOn] = useState(false)
   const [remoteStatus, setRemoteStatus] = useState<Awaited<ReturnType<typeof nexus.getRemoteStatus>> | null>(null)
   const [pairing, setPairing] = useState<Awaited<ReturnType<typeof nexus.regeneratePairing>> | null>(null)
+  const [quotaPlatforms, setQuotaPlatforms] = useState<Awaited<ReturnType<typeof nexus.quotaPlatforms>>>([])
 
   // 启动时读取主题设置
   useEffect(() => {
@@ -119,6 +121,7 @@ export default function App(): JSX.Element {
       const s = await nexus.getRemoteStatus()
       setRemoteStatus(s)
       setRemoteOn(s.enabled)
+      setQuotaPlatforms(await nexus.quotaPlatforms())
     }
     setSettingsOpen((v) => !v)
   }
@@ -258,6 +261,48 @@ export default function App(): JSX.Element {
             </button>
 
             <div className="my-3 h-px bg-hairline" />
+            <div className="mb-1 text-ui-xs text-foreground-subtle">账号与配额</div>
+            {quotaPlatforms.length === 0 ? (
+              <div className="text-ui-xs text-foreground-subtlest">加载中…</div>
+            ) : (
+              <div className="flex flex-col gap-1">
+                {quotaPlatforms.map((p) => (
+                  <div key={p.id} className="flex items-center justify-between gap-2">
+                    <span className="min-w-0 truncate text-ui-sm text-foreground" title={p.id}>
+                      {p.label}
+                      {p.accountCount > 0 && (
+                        <span className="ml-1 font-mono text-ui-xs text-foreground-subtlest">
+                          {p.accountCount} 账号
+                        </span>
+                      )}
+                    </span>
+                    {p.oauthSupported ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void nexus
+                            .quotaLogin(p.id)
+                            .then(() => setToast(`${p.label} 登录成功，配额稍后自动刷新`))
+                            .catch((err) =>
+                              setToast(`登录失败：${err instanceof Error ? err.message : String(err)}`)
+                            )
+                        }}
+                        className="h-6 shrink-0 rounded-lg bg-secondary px-2 text-ui-xs text-foreground transition-colors duration-150 hover:bg-surface-hover"
+                      >
+                        登录
+                      </button>
+                    ) : (
+                      <span className="shrink-0 text-ui-xs text-foreground-subtlest">待接入</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="mt-1 text-ui-xs text-foreground-subtlest">
+              Cursor / Codex CLI 的本机登录态会自动导入；其余平台登录能力陆续接入。
+            </div>
+
+            <div className="my-3 h-px bg-hairline" />
             <div className="mb-1 text-ui-xs text-foreground-subtle">远程访问（局域网）</div>
             <div className="flex items-center justify-between">
               <span className="text-ui-sm text-foreground">{remoteOn ? '已开启' : '已关闭'}</span>
@@ -341,6 +386,9 @@ export default function App(): JSX.Element {
             <>
               {/* 系统状态 */}
               <SystemCard />
+
+              {/* 账号配额 */}
+              <QuotaCard />
 
               {/* KPI 矩阵 */}
               <div className="grid grid-cols-2 gap-4 2xl:grid-cols-4">

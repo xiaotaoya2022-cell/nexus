@@ -36,7 +36,7 @@ export type RemoteFrame<TReq = unknown, TRes = unknown, TPush = unknown> =
   | ResponseFrame<TRes>
   | PushFrame<TPush>
 
-export type PushChannel = 'agent.overview' | 'system.snapshot' | 'alert' | 'dsh.event'
+export type PushChannel = 'agent.overview' | 'system.snapshot' | 'alert' | 'dsh.event' | 'quota'
 
 /** 远程可调用方法（capability 协商：设备令牌记录允许的 method 集合，v3 插件市场扩展位） */
 export type RemoteMethod =

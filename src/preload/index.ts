@@ -27,6 +27,19 @@ const api: NexusApi = {
   regeneratePairing: () => ipcRenderer.invoke('nexus:regeneratePairing'),
   setRemoteEnabled: (enabled: boolean) => ipcRenderer.invoke('nexus:setRemoteEnabled', enabled),
   revokeDevice: (deviceId: string) => ipcRenderer.invoke('nexus:revokeDevice', deviceId),
+  quotaPlatforms: () => ipcRenderer.invoke('nexus:quotaPlatforms'),
+  quotaAccounts: () => ipcRenderer.invoke('nexus:quotaAccounts'),
+  quotaLogin: (platform: string) => ipcRenderer.invoke('nexus:quotaLogin', platform),
+  quotaLogout: (platform: string, accountId: string) =>
+    ipcRenderer.invoke('nexus:quotaLogout', platform, accountId),
+  quotaRefresh: () => ipcRenderer.invoke('nexus:quotaRefresh'),
+  onQuotaUpdate: (cb: (views: import('@shared/quotas').AccountQuotaView[]) => void) => {
+    const listener = (_e: unknown, views: unknown): void => cb(views as import('@shared/quotas').AccountQuotaView[])
+    ipcRenderer.on('nexus:quota-update', listener)
+    return (): void => {
+      ipcRenderer.removeListener('nexus:quota-update', listener)
+    }
+  },
   exportBoard: () => ipcRenderer.invoke('nexus:exportBoard'),
   openPath: (path) => ipcRenderer.invoke('nexus:openPath', path),
   onSyncProgress: (cb: (p: SyncProgress) => void) => {
