@@ -240,6 +240,32 @@ export function registerIpc(deps: IpcDeps): void {
     }
     return { ...st, sessionCount }
   })
+  ipcMain.handle('nexus:getDshSessions', async () => {
+    const st = await deps.dsh.status()
+    if (!st.available) return []
+    try {
+      return await deps.dsh.listSessions()
+    } catch {
+      return []
+    }
+  })
+  ipcMain.handle('nexus:sendDshPrompt', async (_e, sessionId: unknown, text: unknown) => {
+    const sid = typeof sessionId === 'string' && sessionId.length <= 256 ? sessionId : null
+    if (typeof text !== 'string' || text.trim() === '' || text.length > 32000) {
+      throw new Error('prompt 内容为空或超长（上限 32000 字符）')
+    }
+    const created = !sid
+    const r = (await deps.dsh.prompt(sid, text.trim())) as { sessionId?: string }
+    const finalId = typeof r?.sessionId === 'string' && r.sessionId ? r.sessionId : (sid ?? '')
+    void created
+    return { sessionId: finalId }
+  })
+  ipcMain.handle('nexus:cancelDshSession', async (_e, sessionId: unknown) => {
+    if (typeof sessionId !== 'string' || sessionId.length === 0 || sessionId.length > 256) {
+      throw new Error('sessionId 无效')
+    }
+    await deps.dsh.cancel(sessionId)
+  })
   ipcMain.handle('nexus:getQuotaAlertThreshold', (): number => {
     const v = Number(deps.store.getSetting('quotaAlertThreshold') ?? 90)
     return Number.isFinite(v) && v > 0 ? v : 90

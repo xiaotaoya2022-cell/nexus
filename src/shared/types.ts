@@ -140,6 +140,9 @@ export interface NexusApi {
   quotaLogout(platform: string, accountId: string): Promise<void>
   quotaRefresh(): Promise<import('./quotas').AccountQuotaView[]>
   getDshStatus(): Promise<{ available: boolean; degraded: boolean; port: number; sessionCount: number; detail?: string }>
+  getDshSessions(): Promise<Array<{ sessionId: string; workspace?: string; updatedAt?: number | null }>>
+  sendDshPrompt(sessionId: string | null, text: string): Promise<{ sessionId: string }>
+  cancelDshSession(sessionId: string): Promise<void>
   getQuotaAlertThreshold(): Promise<number>
   setQuotaAlertThreshold(percent: number): Promise<number>
   onQuotaUpdate(cb: (views: import('./quotas').AccountQuotaView[]) => void): () => void

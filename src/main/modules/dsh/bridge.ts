@@ -99,7 +99,7 @@ export class DshBridge {
     return this.rpc<{ sessionId: string }>('session.create', params)
   }
 
-  async prompt(sessionId: string, text: string): Promise<unknown> {
+  async prompt(sessionId: string | null, text: string): Promise<unknown> {
     return this.rpc('session.prompt', {
       sessionId,
       mode: 'queue',
