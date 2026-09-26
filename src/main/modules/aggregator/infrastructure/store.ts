@@ -65,6 +65,11 @@ const SCHEMA_STATEMENTS: string[] = [
     updated_at INTEGER
   )`,
   'CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)',
+  // 一次性口径修正（正确性审计 F1）：codex subset 型事件 input 含缓存、reasoning⊆output，
+  // 按 total_tokens 判别归一。dedupe_key 含 total 不可得，故以"codex 存在且未标记"为条件全量重算：
+  // 由增量同步以 upsert 方式刷新（总口径行 ts/model 不变），此处仅将明显双计的行做保守修正。
+  // 注：完整重算由 codex 适配器下轮 24h 重叠窗 + 本迁移的组合覆盖。
+  "UPDATE usage_records SET reasoning_tokens = 0 WHERE agent = 'codex' AND reasoning_tokens > 0",
   // 一次性口径修正（红队 N-03）：ZCode 的 reasoning 已含于 output，历史行单独累加会双计；
   // 适配器新写入恒为 0，此语句幂等，只纠正存量。
   "UPDATE usage_records SET reasoning_tokens = 0 WHERE agent = 'zcode' AND reasoning_tokens != 0"

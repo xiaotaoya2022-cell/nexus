@@ -38,7 +38,7 @@ function AccountRow({ view }: { view: AccountQuotaView }): JSX.Element {
         <span className="text-ui-caption font-medium text-foreground">{view.platformLabel}</span>
         <span className="truncate text-ui-xs text-foreground-subtlest">{view.label}</span>
         {view.planLabel && (
-          <span className="h-5 rounded-full border-transparent bg-idle-surface px-2 text-ui-xs font-medium leading-5 text-idle">
+          <span className="h-5 rounded-full border border-border bg-surface px-2 text-ui-xs font-medium leading-5 text-foreground-subtle">
             {view.planLabel}
           </span>
         )}

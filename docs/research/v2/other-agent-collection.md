@@ -65,3 +65,15 @@
 1. P2：读 cockpit 配额缓存 JSON（`cache/quota_api_v1_desktop/`，白名单解析，只取配额字段），在 Nexus 加"账号配额"面板（依赖 cockpit 运行中）。
 2. P2：request_logs 有数据后，把 `estimated_cost_usd` 等成本字段接入 Nexus 成本估算（替代/校准公开牌价估算）。
 3. 记录：cockpit 的多开实例（`instances/zcode/<id>/electron`）与本模块实例发现的对接点。
+
+
+## 附：cockpit-tools v1.3.60 增量（2026-09-25 发布，本地源码为 1.3.59）
+
+对 Nexus 有影响的变更喵：
+1. **Codex 代理功能大更新**：订阅导入/节点切换/分组测速/故障转移/负载均衡/出口 IP/**请求日志**——
+   request_logs 数据面增强，Nexus 网关接入适配器无需改动，数据更丰富喵。
+2. **新版 WorkBuddy 支持**：账号切换+本机导入——workbuddy OAuth 流程可能随新版变化，届时复核喵。
+3. **GPT-6/GPT-5.6 Sol 费用估算**：Nexus pricing.ts 可参考其模型定价更新喵。
+4. 鹈鹕测智/唤醒可独立运行（不依赖 API 服务）喵。
+
+结论：本地源码(1.3.59)的移植结论仍有效喵；建议跟踪 1.3.60+ 的 Codex 代理日志字段变化喵。

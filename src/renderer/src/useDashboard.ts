@@ -64,7 +64,10 @@ export function useDashboard(): {
   reloadRef.current = reload
 
   useEffect(() => {
-    void reload()
+    reload().catch((err) => {
+      // 拉取失败静默保留旧数据，控制台可见（避免 unhandled rejection）
+      console.error('dashboard reload failed', err)
+    })
   }, [reload])
 
   useEffect(() => {

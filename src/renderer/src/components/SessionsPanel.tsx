@@ -17,8 +17,11 @@ export function SessionsPanel({
     <aside className="flex w-[320px] shrink-0 flex-col gap-2 rounded-xl bg-panel p-3">
       <header className="flex items-center justify-between px-1">
         <h2 className="text-ui-base font-medium text-foreground">会话明细</h2>
-        <span className="font-mono text-ui-xs tabular-nums text-foreground-subtlest">
-          {sessions.length}
+        <span
+          className="font-mono text-ui-xs tabular-nums text-foreground-subtlest"
+          title={`共 ${sessions.length} 条（最多显示前 120 条）`}
+        >
+          {sessions.length > 120 ? `120 / ${sessions.length}` : sessions.length}
         </span>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto">
