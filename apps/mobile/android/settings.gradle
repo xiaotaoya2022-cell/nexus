@@ -2,4 +2,8 @@ include ':app'
 include ':capacitor-cordova-android-plugins'
 project(':capacitor-cordova-android-plugins').projectDir = new File('./capacitor-cordova-android-plugins/')
 
+// WireGuard 隧道模块（源码集成，路径指向仓库外源码目录）
+include ':tunnel'
+project(':tunnel').projectDir = new File(rootDir, '../wireguard-android-src/tunnel')
+
 apply from: 'capacitor.settings.gradle'
