@@ -60,6 +60,7 @@ export default function App(): JSX.Element {
   const [pairing, setPairing] = useState<Awaited<ReturnType<typeof nexus.regeneratePairing>> | null>(null)
   const [quotaPlatforms, setQuotaPlatforms] = useState<Awaited<ReturnType<typeof nexus.quotaPlatforms>>>([])
   const [quotaAlert, setQuotaAlert] = useState(90)
+  const [dshStatus, setDshStatus] = useState<Awaited<ReturnType<typeof nexus.getDshStatus>> | null>(null)
 
   // 启动时读取主题设置
   useEffect(() => {
@@ -123,6 +124,7 @@ export default function App(): JSX.Element {
       setRemoteStatus(s)
       setRemoteOn(s.enabled)
       setQuotaPlatforms(await nexus.quotaPlatforms())
+      setDshStatus(await nexus.getDshStatus())
       setQuotaAlert(await nexus.getQuotaAlertThreshold())
     }
     setSettingsOpen((v) => !v)
@@ -322,6 +324,23 @@ export default function App(): JSX.Element {
                 <option value={95}>95%</option>
               </select>
             </div>
+
+            <div className="my-3 h-px bg-hairline" />
+            <div className="mb-1 text-ui-xs text-foreground-subtle">DeepSeek Harness</div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="min-w-0 truncate text-ui-sm text-foreground">
+                {dshStatus?.available
+                  ? `已连接 · 端口 ${dshStatus.port}${dshStatus.sessionCount ? ` · ${dshStatus.sessionCount} 会话` : ''}`
+                  : '未检测到运行中的 DSH'}
+              </span>
+              <span
+                className={`h-1.5 w-1.5 shrink-0 rounded-full ${dshStatus?.available ? 'bg-success' : 'bg-border'}`}
+                title={dshStatus?.available ? 'DSH 可用' : 'DSH 未运行'}
+              />
+            </div>
+            {dshStatus?.detail && (
+              <div className="text-ui-xs text-foreground-subtlest">{dshStatus.detail}</div>
+            )}
 
             <div className="my-3 h-px bg-hairline" />
             <div className="mb-1 text-ui-xs text-foreground-subtle">远程访问（局域网）</div>

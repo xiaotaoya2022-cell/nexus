@@ -139,6 +139,7 @@ export interface NexusApi {
   quotaLogin(platform: string): Promise<void>
   quotaLogout(platform: string, accountId: string): Promise<void>
   quotaRefresh(): Promise<import('./quotas').AccountQuotaView[]>
+  getDshStatus(): Promise<{ available: boolean; degraded: boolean; port: number; sessionCount: number; detail?: string }>
   getQuotaAlertThreshold(): Promise<number>
   setQuotaAlertThreshold(percent: number): Promise<number>
   onQuotaUpdate(cb: (views: import('./quotas').AccountQuotaView[]) => void): () => void

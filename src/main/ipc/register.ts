@@ -228,6 +228,18 @@ export function registerIpc(deps: IpcDeps): void {
     }
   })
   ipcMain.handle('nexus:quotaRefresh', async () => deps.quota.refreshNow())
+  ipcMain.handle('nexus:getDshStatus', async () => {
+    const st = await deps.dsh.status()
+    let sessionCount = 0
+    if (st.available) {
+      try {
+        sessionCount = (await deps.dsh.listSessions()).length
+      } catch {
+        // 会话拉取失败不影响状态展示
+      }
+    }
+    return { ...st, sessionCount }
+  })
   ipcMain.handle('nexus:getQuotaAlertThreshold', (): number => {
     const v = Number(deps.store.getSetting('quotaAlertThreshold') ?? 90)
     return Number.isFinite(v) && v > 0 ? v : 90
