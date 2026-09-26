@@ -119,12 +119,21 @@ export class CodexAdapter implements AgentAdapter {
           if (!last) return
           const n = (k: string): number =>
             typeof last[k] === 'number' && Number.isFinite(last[k]) ? (last[k] as number) : 0
-          const input = n('input_tokens')
+          let input = n('input_tokens')
           const output = n('output_tokens')
+          let reasoning = n('reasoning_output_tokens')
           const cacheRead = n('cached_input_tokens')
           const cacheWrite = n('cache_write_input_tokens')
-          const reasoning = n('reasoning_output_tokens')
-          if (input + output + cacheRead + cacheWrite + reasoning === 0) return
+          // 口径归一（正确性审计 F1）：codex last_token_usage 存在两种口径——
+          // total == i+o+c+w+r（五字段互斥）或 total == i+o+c+w（input 含缓存、
+          // reasoning⊆output）。按 total_tokens 判别，统一为互斥五字段。
+          const total = n('total_tokens')
+          const sum5 = input + output + reasoning + cacheRead + cacheWrite
+          if (total > 0 && total !== sum5 && total === input + output + cacheRead + cacheWrite) {
+            const cacheTotal = cacheRead + cacheWrite
+            input = Math.max(0, input - cacheTotal)
+            reasoning = 0
+          }
           usageRows.push({
             agent: this.id,
             model: st.model ?? 'unknown',

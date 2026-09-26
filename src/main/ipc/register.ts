@@ -146,7 +146,7 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle(
     'nexus:getTrend',
     (_e, range: RangeKey, agent: string | null, groupBy: 'model' | 'agent') =>
-      q.getTrend(range, agent, groupBy)
+      q.getTrend(range, agent, groupBy === 'agent' ? 'agent' : 'model')
   )
   ipcMain.handle('nexus:getByAgent', (_e, range: RangeKey) => q.getByAgent(range))
   ipcMain.handle('nexus:getByModel', (_e, range: RangeKey, agent: string | null) =>

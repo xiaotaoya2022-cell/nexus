@@ -101,14 +101,20 @@ export class SyncService {
     const days = Number(this.store.getSetting('retentionDays') ?? 0)
     if (!Number.isFinite(days) || days <= 0) return
     const cutoff = Date.now() - days * 86400_000
-    this.store.db.prepare('DELETE FROM usage_records WHERE ts < ?').run(cutoff)
-    this.store.db.prepare('DELETE FROM tool_calls WHERE ts IS NOT NULL AND ts < ?').run(cutoff)
-    // 会话元数据一并清理（蓝队 F3）；无时间戳的行保守保留
-    this.store.db
-      .prepare(
-        'DELETE FROM sessions WHERE COALESCE(updated_at, started_at, 0) > 0 AND COALESCE(updated_at, started_at, 0) < ?'
-      )
-      .run(cutoff)
+    this.store.db.prepare('BEGIN').run()
+    try {
+      this.store.db.prepare('DELETE FROM usage_records WHERE ts < ?').run(cutoff)
+      this.store.db.prepare('DELETE FROM tool_calls WHERE ts IS NOT NULL AND ts < ?').run(cutoff)
+      // 会话元数据一并清理（蓝队 F3）；无时间戳的行保守保留
+      this.store.db
+        .prepare(
+          'DELETE FROM sessions WHERE COALESCE(updated_at, started_at, 0) > 0 AND COALESCE(updated_at, started_at, 0) < ?'
+        )
+        .run(cutoff)
+      this.store.db.prepare('COMMIT').run()
+    } catch {
+      this.store.db.prepare('ROLLBACK').run()
+    }
     logger.info('store.cleanup', { retentionDays: days, cutoff })
   }
 

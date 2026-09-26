@@ -253,6 +253,12 @@ export class RemoteServer {
       return
     }
     const state: ConnState = { deviceId: null, channels: new Set(), reqTimestamps: [], authNonce: null }
+    // 未鉴权连接 60s 强制断开（防空连接占满）
+    const authKick = setTimeout(() => {
+      if (state.deviceId == null) ws.close()
+    }, 60_000)
+    authKick.unref()
+    ws.on('close', () => clearTimeout(authKick))
     this.conns.set(ws, state)
     this.lastConnOpenAt = Date.now()
     // eslint-disable-next-line no-console
@@ -403,6 +409,7 @@ export class RemoteServer {
             sessionId = (await this.deps.dsh.createSession({})).sessionId
           }
           const res = await this.deps.dsh.prompt(sessionId, p.text)
+          if (state.deviceId) this.audit(state.deviceId, 'dsh.prompt', true, sessionId)
           this.send(ws, { v: 1, type: 'res', id: frame.id, ok: true, payload: { sessionId, res } })
           return
         }
@@ -412,6 +419,7 @@ export class RemoteServer {
             this.sendErr(ws, frame.id, 'BAD_REQUEST', 'sessionId 缺失')
             return
           }
+          if (state.deviceId) this.audit(state.deviceId, 'dsh.cancel', true, p.sessionId ?? '')
           this.send(ws, { v: 1, type: 'res', id: frame.id, ok: true, payload: await this.deps.dsh.cancel(p.sessionId) })
           return
         }
@@ -429,8 +437,9 @@ export class RemoteServer {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      if (state.deviceId) this.audit(state.deviceId, String(method), false, message)
-      this.sendErr(ws, frame.id, 'UPSTREAM_ERROR', message.slice(0, 200))
+      if (state.deviceId) this.audit(state.deviceId, String(method), false, message.slice(0, 120))
+      // 不回传上游错误原文（防内网错误细节泄漏），只给固定文案
+      this.sendErr(ws, frame.id, 'UPSTREAM_ERROR', '上游调用失败')
     }
   }
 

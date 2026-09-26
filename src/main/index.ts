@@ -58,6 +58,11 @@ function createWindow(): void {
       sandbox: true
     }
   })
+  // 导航锁定：任何导航/新窗口一律阻止（外链走 shell.openExternal）
+  mainWindow.webContents.on('will-navigate', (e, url) => {
+    if (!url.startsWith('http://localhost:') && !url.startsWith('file://')) e.preventDefault()
+  })
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   mainWindow.once('ready-to-show', () => mainWindow?.show())
   mainWindow.on('closed', () => {
     mainWindow = null
