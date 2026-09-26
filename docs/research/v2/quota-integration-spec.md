@@ -73,3 +73,13 @@ UI：看板「账号配额」卡（订阅推送实时更新）+ 设置「账号�
 
 注意：tunnel 模块 build.gradle.kts 要求 compileSdk 36 + AGP 兼容（当前主工程 AGP 8.2.1 /
 compileSdk 34）——要么升级主工程 compileSdk 至 36，要么将模块 compileSdk 降至 34（源码兼容性待验证）。
+
+## 附2：集成进展（本批）
+
+- tunnel 模块已挂载主工程：settings.gradle include + gradle.properties(wireguardPackageName) +
+  模块 compileSdk 36→34、去除 version catalog/maven-publish 依赖（传统 build.gradle 化）
+- app 依赖切换 implementation project(':tunnel')；NexusVpnService.kt/Manifest 已恢复
+- assembleDebug BUILD SUCCESSFUL；**遗留：libwg-go.so 未打入 apk**
+  （externalNativeBuild 未触发，apk 内无 .so；当前版本未暴露 VPN 开关故无运行时影响）
+- 下批首项：clean 后强制 externalNativeBuild（验证 NDK+CMake 构建 libwg-go.so），
+  再接 GoBackend.setState 与设置面板 VPN 开关
