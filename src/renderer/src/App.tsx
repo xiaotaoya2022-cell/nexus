@@ -208,12 +208,12 @@ export default function App(): JSX.Element {
   return (
     <div className="flex h-full flex-col bg-background text-foreground">
       {/* 顶栏 */}
-      <header className="relative flex h-12 shrink-0 items-center gap-4 border-b border-border bg-panel px-4">
+      <header style={{WebkitAppRegion: "drag"} as React.CSSProperties} className="relative flex h-12 shrink-0 items-center gap-4 border-b border-border bg-panel px-4">
         <div className="flex items-baseline gap-2">
           <span className="text-ui-base font-medium">Nexus</span>
           <span className="text-ui-sm text-foreground-subtlest">本地算力监控</span>
         </div>
-        <div className="flex-1" />
+        <div className="flex-1" style={{WebkitAppRegion: "no-drag"} as React.CSSProperties} />
         {sync.phase === 'running' && (
           <span className="text-ui-xs text-foreground-subtle">同步中…</span>
         )}

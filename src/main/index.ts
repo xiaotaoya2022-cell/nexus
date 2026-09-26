@@ -45,6 +45,12 @@ function createWindow(): void {
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#161616' : '#f8f8f8',
     autoHideMenuBar: true,
     show: false,
+    // 无系统标题栏，自绘顶栏（ZCode 同款形态）；Windows 用 WCO 补回窗口控制钮
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      symbolColor: nativeTheme.shouldUseDarkColors ? '#d4d4d4' : '#262626',
+      height: 48
+    },
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
