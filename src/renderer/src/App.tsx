@@ -222,16 +222,16 @@ export default function App(): JSX.Element {
           <span className="text-ui-xs text-foreground-subtle">同步中…</span>
         )}
         <PillSwitcher options={RANGE_OPTIONS} value={range} onChange={(r: RangeKey) => useUi.getState().setRange(r)} />
-        <IconButton title="立即同步" onClick={() => void nexus.syncNow()} spinning={sync.phase === 'running'}>
+        <IconButton style={{WebkitAppRegion: "no-drag"} as React.CSSProperties} title="立即同步" style={{WebkitAppRegion: "no-drag"} as React.CSSProperties} onClick={() => void nexus.syncNow()} spinning={sync.phase === 'running'}>
           <RefreshIcon />
         </IconButton>
         <IconButton title={theme === 'dark' ? '切换亮色' : '切换暗色'} onClick={() => void toggleTheme()}>
           {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
         </IconButton>
-        <IconButton title="导出看板为图片" onClick={() => void handleExport()}>
+        <IconButton style={{WebkitAppRegion: "no-drag"} as React.CSSProperties} title="导出看板为图片" style={{WebkitAppRegion: "no-drag"} as React.CSSProperties} onClick={() => void handleExport()}>
           <ExportIcon />
         </IconButton>
-        <IconButton title="设置" onClick={() => void openSettings()}>
+        <IconButton style={{WebkitAppRegion: "no-drag"} as React.CSSProperties} title="设置" style={{WebkitAppRegion: "no-drag"} as React.CSSProperties} onClick={() => void openSettings()}>
           <GearIcon />
         </IconButton>
         {settingsOpen && (

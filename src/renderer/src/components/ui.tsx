@@ -120,18 +120,21 @@ export function IconButton({
   title,
   onClick,
   children,
-  spinning
+  spinning,
+  style
 }: {
   title: string
   onClick: () => void
   children: ReactNode
   spinning?: boolean
+  style?: React.CSSProperties
 }): JSX.Element {
   return (
     <button
       type="button"
       title={title}
       onClick={onClick}
+      style={style}
       className="flex size-7 items-center justify-center rounded-lg text-foreground-subtle transition-colors duration-150 hover:bg-hover hover:text-foreground"
     >
       <span className={spinning ? 'nx-spin' : undefined}>{children}</span>

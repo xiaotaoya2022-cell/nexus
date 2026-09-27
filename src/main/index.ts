@@ -92,12 +92,8 @@ function createWindow(): void {
       setTimeout(() => {
         void (async () => {
           if (!mainWindow) return
-          const scroll =
-            process.env.NEXUS_CAPTURE_SCROLL === 'bottom'
-              ? 'document.body.scrollHeight'
-              : '0'
           await mainWindow.webContents.executeJavaScript(
-            `window.scrollTo(0, 0); document.querySelector('main')?.scrollTo(0, ${scroll === '0' ? '0' : '999999'}); true`,
+            `window.scrollTo(0, 0); document.querySelector('main')?.scrollTo(0, ${process.env.NEXUS_CAPTURE_SCROLL === 'bottom' ? '999999' : '0'}); true`,
             true
           )
           await new Promise((r) => setTimeout(r, 300))
