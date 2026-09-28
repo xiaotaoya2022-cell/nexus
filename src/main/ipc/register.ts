@@ -13,6 +13,7 @@ import type { SystemCollector } from '../modules/system/collector'
 import type { ZcodeManager } from '../modules/zcode/manager'
 import type { DshBridge } from '../modules/dsh/bridge'
 import type { CockpitBridge } from '../modules/cockpit/bridge'
+import { DshLocalSessionReader } from '../modules/dsh/sessions-reader'
 import type { QuotaEngine } from '../modules/quotas/engine'
 import type { RemoteServer } from '../modules/remote/server'
 import { rangeStartMs } from '../modules/aggregator/application/query-service'
@@ -29,6 +30,7 @@ export interface IpcDeps {
   system: SystemCollector
   zcode: ZcodeManager
   dsh: DshBridge
+  dshLocal: DshLocalSessionReader
   cockpit: CockpitBridge
   quota: QuotaEngine
   remote: RemoteServer
@@ -241,10 +243,9 @@ export function registerIpc(deps: IpcDeps): void {
     return { ...st, sessionCount }
   })
   ipcMain.handle('nexus:getDshSessions', async () => {
-    const st = await deps.dsh.status()
-    if (!st.available) return []
+    // 本地 zstd 会话枚举：不依赖 DSH 运行（数据在本机即见）
     try {
-      return await deps.dsh.listSessions()
+      return await deps.dshLocal.listAll(120)
     } catch {
       return []
     }

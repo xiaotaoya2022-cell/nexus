@@ -10,6 +10,7 @@ import { QueryService } from './modules/aggregator/application/query-service'
 import { SystemCollector } from './modules/system/collector'
 import { ZcodeManager } from './modules/zcode/manager'
 import { DshBridge } from './modules/dsh/bridge'
+import { DshLocalSessionReader } from './modules/dsh/sessions-reader'
 import { CockpitBridge } from './modules/cockpit/bridge'
 import { QuotaEngine } from './modules/quotas/engine'
 import { PLATFORM_INTEGRATIONS } from './modules/quotas/platforms/registry'
@@ -167,6 +168,7 @@ app.whenReady()
   const system = new SystemCollector()
   const zcode = new ZcodeManager()
   const dsh = new DshBridge()
+  const dshLocal = new DshLocalSessionReader()
   const cockpit = new CockpitBridge()
   const quota = new QuotaEngine(app.getPath('userData'), (key) => store?.getSetting(key) ?? null, (views) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -193,7 +195,7 @@ app.whenReady()
     remoteSecret
   )
 
-  registerIpc({ store, query, sync, adapters, presence: PRESENCE_ONLY_AGENTS, system, zcode, dsh, cockpit, quota, remote, getMainWindow: () => mainWindow })
+  registerIpc({ store, query, sync, adapters, presence: PRESENCE_ONLY_AGENTS, system, zcode, dsh, dshLocal, cockpit, quota, remote, getMainWindow: () => mainWindow })
 
   quota.startPolling()
 
