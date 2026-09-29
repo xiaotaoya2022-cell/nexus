@@ -128,6 +128,7 @@ export default function App(): JSX.Element {
       setRemoteOn(s.enabled)
       setQuotaPlatforms(await nexus.quotaPlatforms())
       setDshStatus(await nexus.getDshStatus())
+      void nexus.getDshSessions().then(setDshSessions)
       if (dshStatus == null || true) void nexus.getDshSessions().then(setDshSessions)
       setQuotaAlert(await nexus.getQuotaAlertThreshold())
     }
@@ -353,6 +354,28 @@ export default function App(): JSX.Element {
             </div>
             {dshStatus?.detail && (
               <div className="text-ui-xs text-foreground-subtlest">{dshStatus.detail}</div>
+            )}
+            {dshStatus?.available && dshSessions.length > 0 && (
+              <div className="mt-2 flex flex-col gap-0.5">
+                <div className="text-ui-xs text-foreground-subtle">会话（点击取消）：</div>
+                {dshSessions.slice(0, 8).map((sess) => (
+                  <button
+                    key={sess.sessionId}
+                    type="button"
+                    title={`取消会话 ${sess.sessionId}`}
+                    onClick={() => {
+                      void nexus
+                        .cancelDshSession(sess.sessionId)
+                        .then(() => nexus.getDshSessions().then(setDshSessions))
+                        .catch((err) => setToast(`取消失败：${err instanceof Error ? err.message : String(err)}`))
+                    }}
+                    className="flex items-center justify-between rounded-md px-1.5 py-0.5 text-left text-ui-xs text-foreground-subtle transition-colors duration-150 hover:bg-hover hover:text-foreground"
+                  >
+                    <span className="truncate">{sess.sessionId.slice(0, 12)}…</span>
+                    <span className="text-destructive">取消</span>
+                  </button>
+                ))}
+              </div>
             )}
             {dshStatus?.available && dshSessions.length > 0 && (
               <div className="mt-2 flex flex-col gap-0.5">
