@@ -38,6 +38,8 @@ const api: NexusApi = {
   sendDshPrompt: (sessionId: string | null, text: string) =>
     ipcRenderer.invoke('nexus:sendDshPrompt', sessionId, text),
   cancelDshSession: (sessionId: string) => ipcRenderer.invoke('nexus:cancelDshSession', sessionId),
+  getSavedRange: () => ipcRenderer.invoke('nexus:getSavedRange'),
+  setSavedRange: (range: string) => ipcRenderer.invoke('nexus:setSavedRange', range),
   getQuotaAlertThreshold: () => ipcRenderer.invoke('nexus:getQuotaAlertThreshold'),
   setQuotaAlertThreshold: (percent: number) => ipcRenderer.invoke('nexus:setQuotaAlertThreshold', percent),
   onQuotaUpdate: (cb: (views: import('@shared/quotas').AccountQuotaView[]) => void) => {

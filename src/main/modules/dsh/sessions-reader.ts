@@ -88,6 +88,40 @@ function byRecency(a: DshLocalSession, b: DshLocalSession): number {
 export class DshLocalSessionReader {
   private readonly base = SESSIONS_DIR
 
+  /** 轻量枚举：仅目录/mtime，不解压 zstd（侧栏/状态用，毫秒级）。 */
+  listSummaries(): DshLocalSession[] {
+    if (!existsSync(this.base)) return []
+    const out: DshLocalSession[] = []
+    for (const ws of readdirSync(this.base)) {
+      const wsdir = join(this.base, ws)
+      let sessDirs: string[] = []
+      try {
+        sessDirs = readdirSync(wsdir).filter((d) => d.startsWith('session-'))
+      } catch {
+        continue
+      }
+      let latest = 0
+      for (const sess of sessDirs) {
+        try {
+          const mt = statSync(join(wsdir, sess, 'session.jsonl.zstd')).mtimeMs
+          if (mt > latest) latest = mt
+        } catch {
+          continue
+        }
+      }
+      out.push({
+        sessionId: ws,
+        workspaceDir: decodeWorkspaceDir(ws),
+        workspaceLabel: decodeWorkspaceDir(ws),
+        startedAt: null,
+        updatedAt: latest || null,
+        messageCount: sessDirs.length,
+        title: null
+      })
+    }
+    return out.sort(byRecency)
+  }
+
   available(): boolean {
     return existsSync(this.base)
   }

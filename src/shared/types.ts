@@ -144,6 +144,8 @@ export interface NexusApi {
   getDshSessions(): Promise<Array<{ sessionId: string; workspace?: string; updatedAt?: number | null }>>
   sendDshPrompt(sessionId: string | null, text: string): Promise<{ sessionId: string }>
   cancelDshSession(sessionId: string): Promise<void>
+  getSavedRange(): Promise<RangeKey>
+  setSavedRange(range: RangeKey): Promise<void>
   getQuotaAlertThreshold(): Promise<number>
   setQuotaAlertThreshold(percent: number): Promise<number>
   onQuotaUpdate(cb: (views: import('./quotas').AccountQuotaView[]) => void): () => void

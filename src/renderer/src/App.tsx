@@ -63,11 +63,13 @@ export default function App(): JSX.Element {
   const [dshStatus, setDshStatus] = useState<Awaited<ReturnType<typeof nexus.getDshStatus>> | null>(null)
   const [dshSessions, setDshSessions] = useState<Awaited<ReturnType<typeof nexus.getDshSessions>>>([])
 
-  // 启动时读取主题设置
+  // 启动时读取主题与上次时间范围
   useEffect(() => {
     void (async () => {
       const s = await nexus.getSettings()
       useUi.getState().setTheme(s.theme)
+      const r = await nexus.getSavedRange()
+      useUi.getState().setRange(r)
     })()
   }, [])
 
@@ -222,7 +224,14 @@ export default function App(): JSX.Element {
           <span className="text-ui-xs text-foreground-subtle">同步中…</span>
         )}
         <div style={{WebkitAppRegion: "no-drag"} as React.CSSProperties}>
-          <PillSwitcher options={RANGE_OPTIONS} value={range} onChange={(r: RangeKey) => useUi.getState().setRange(r)} />
+          <PillSwitcher
+            options={RANGE_OPTIONS}
+            value={range}
+            onChange={(r: RangeKey) => {
+              useUi.getState().setRange(r)
+              void nexus.setSavedRange(r)
+            }}
+          />
         </div>
         <IconButton style={{WebkitAppRegion: "no-drag"} as React.CSSProperties} title="立即同步" onClick={() => void nexus.syncNow()} spinning={sync.phase === 'running'}>
           <RefreshIcon />

@@ -100,6 +100,25 @@ function buildAgentInfos(deps: IpcDeps): AgentInfo[] {
     }
   }
 
+  // DSH：本地 zstd 会话（不依赖进程运行）
+  let dshEntry: AgentInfo | null = null
+  if (deps.dshLocal.available()) {
+    const localSessions = deps.dshLocal.listSummaries()
+    const total = localSessions.length
+    const latest = localSessions.reduce((m, s2) => Math.max(m, s2.updatedAt ?? 0), 0)
+    dshEntry = {
+      id: 'dsh',
+      label: 'DeepSeek Harness',
+      detected: true,
+      status: latest > 0 && now - latest <= IDLE_WINDOW_MS ? 'idle' : 'offline',
+      todayTokens: 0,
+      todayRequests: 0,
+      lastActivityAt: latest || null,
+      sessionCount: total,
+      note: `${total} 本地会话（zstd）`
+    }
+  }
+
   const infos: AgentInfo[] = []
   for (const [id, meta] of known) {
     const adapter = deps.adapters.find((a) => a.id === id)
@@ -130,6 +149,7 @@ function buildAgentInfos(deps: IpcDeps): AgentInfo[] {
       note,
     })
   }
+  if (dshEntry) infos.push(dshEntry)
   // 有数据的排前，其余按名称
   return infos.sort((a, b) => {
     const ta = a.todayTokens + a.sessionCount
@@ -266,6 +286,16 @@ export function registerIpc(deps: IpcDeps): void {
       throw new Error('sessionId 无效')
     }
     await deps.dsh.cancel(sessionId)
+  })
+  ipcMain.handle('nexus:getSavedRange', (): RangeKey => {
+    const v = deps.store.getSetting('range')
+    return v === 'today' || v === '7d' || v === '30d' || v === 'month' || v === 'year' || v === 'all' ? v : '7d'
+  })
+  ipcMain.handle('nexus:setSavedRange', (_e, range: unknown): RangeKey => {
+    const v = String(range)
+    const valid: RangeKey = v === 'today' || v === '7d' || v === '30d' || v === 'month' || v === 'year' || v === 'all' ? (v as RangeKey) : '7d'
+    deps.store.setSetting('range', valid)
+    return valid
   })
   ipcMain.handle('nexus:getQuotaAlertThreshold', (): number => {
     const v = Number(deps.store.getSetting('quotaAlertThreshold') ?? 90)
