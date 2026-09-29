@@ -169,6 +169,7 @@ app.whenReady()
   const zcode = new ZcodeManager()
   const dsh = new DshBridge()
   const dshLocal = new DshLocalSessionReader()
+  sync.setDshLocalReader(dshLocal)
   const cockpit = new CockpitBridge()
   const quota = new QuotaEngine(app.getPath('userData'), (key) => store?.getSetting(key) ?? null, (views) => {
     if (mainWindow && !mainWindow.isDestroyed()) {

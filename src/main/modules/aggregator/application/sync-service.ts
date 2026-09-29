@@ -2,6 +2,7 @@
 // 并向渲染进程广播进度。启动时立即同步一次，之后每 60s 轮询。
 
 import type { AgentAdapter } from '@main/modules/adapter/domain/types'
+import { DshLocalSessionReader } from '@main/modules/dsh/sessions-reader'
 import type { SyncProgress } from '@shared/types'
 import type { NexusStore } from '../infrastructure/store'
 import { logger } from '@main/modules/shared/logger'
@@ -19,6 +20,13 @@ export class SyncService {
   }
   private timer: NodeJS.Timeout | null = null
   private syncing = false
+
+  private dshLocalReader: DshLocalSessionReader | null = null
+
+  /** 注入 DSH 本地会话读取器（不依赖 DSH 进程，直接读本机 zstd 数据）。 */
+  setDshLocalReader(reader: DshLocalSessionReader): void {
+    this.dshLocalReader = reader
+  }
 
   constructor(
     private readonly store: NexusStore,
@@ -80,6 +88,30 @@ export class SyncService {
         const message = err instanceof Error ? err.message : String(err)
         started.results.push({ agent: adapter.id, records: 0, sessions: 0, tools: 0, error: message })
         logger.error('adapter.failed', { agent: adapter.id, error: message })
+      }
+    }
+
+    // DSH 本地 zstd 会话 → sessions 表（不依赖 DSH 运行）
+    if (this.dshLocalReader) {
+      try {
+        const localSessions = await this.dshLocalReader.listAll(500)
+        if (localSessions.length) {
+          this.store.upsertSessions(
+            localSessions.map((ls) => ({
+              agent: 'dsh',
+              sessionId: ls.sessionId,
+              title: ls.title,
+              projectDir: ls.workspaceLabel,
+              model: null,
+              startedAt: ls.startedAt,
+              updatedAt: ls.updatedAt
+            }))
+          )
+        }
+      } catch (err) {
+        logger.warn('quota.dsh_local_sync_failed', {
+          error: err instanceof Error ? err.message : String(err)
+        })
       }
     }
 
