@@ -27,6 +27,9 @@ interface StoredCache {
 
 const EMPTY_VIEWS: Record<string, AccountQuotaView[]> = {}
 
+/** 账号每日真实消耗落库回调（platform, accountId, rows） */
+export type UsageSink = (platform: string, accountId: string, rows: import('@shared/quotas').AccountUsagePoint[]) => void
+
 export class QuotaEngine {
   private integrations: PlatformIntegration[] = []
   private views: Record<string, AccountQuotaView[]> = {}
@@ -34,6 +37,7 @@ export class QuotaEngine {
   private refreshing = false
   /** 告警去重：account:window → 上次告警时间（6h 内不重复） */
   private lastAlertAt = new Map<string, number>()
+  private onUsage?: UsageSink
 
   constructor(
     private readonly userDataDir: string,
@@ -42,6 +46,11 @@ export class QuotaEngine {
     private readonly onAlert?: (alert: { level: 'warn' | 'error'; title: string; body: string }) => void
   ) {
     this.views = this.loadCache().views ?? EMPTY_VIEWS
+  }
+
+  /** 注入账号用量落库通道（main 侧接 NexusStore.upsertAccountUsage）。 */
+  setUsageSink(sink: UsageSink): void {
+    this.onUsage = sink
   }
 
   registerIntegrations(list: PlatformIntegration[]): void {
@@ -205,6 +214,18 @@ export class QuotaEngine {
         const quota = await this.fetchWithRefresh(integration, cred, platformId)
         views.push({ ...base, planLabel: quota.planLabel, windows: quota.windows, extra: quota.extra })
         this.checkAlerts(base, quota.windows)
+        // 账号级每日真实消耗（如 DeepSeek 官方账单）→ 落库
+        if (typeof integration.fetchUsage === 'function') {
+          try {
+            const rows = await integration.fetchUsage(cred)
+            if (rows.length > 0) this.onUsage?.(platformId, base.accountId, rows)
+          } catch (usageErr) {
+            logger.warn('quota.usage_failed', {
+              platform: platformId,
+              error: usageErr instanceof Error ? usageErr.message : String(usageErr)
+            })
+          }
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         logger.warn('quota.fetch_failed', { platform: platformId, error: message })

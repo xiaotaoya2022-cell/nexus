@@ -65,6 +65,18 @@ const SCHEMA_STATEMENTS: string[] = [
     updated_at INTEGER
   )`,
   'CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)',
+  // 账号级每日真实消耗（官方账单口径，如 DeepSeek 开放平台 usage API）
+  `CREATE TABLE IF NOT EXISTS account_usage_daily (
+    platform TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    day TEXT NOT NULL,
+    requests INTEGER NOT NULL DEFAULT 0,
+    tokens INTEGER NOT NULL DEFAULT 0,
+    cost_amount REAL NOT NULL DEFAULT 0,
+    currency TEXT NOT NULL DEFAULT 'CNY',
+    updated_at INTEGER,
+    PRIMARY KEY (platform, account_id, day)
+  )`,
   // 一次性口径修正（正确性审计 F1）：codex subset 型事件 input 含缓存、reasoning⊆output，
   // 按 total_tokens 判别归一。dedupe_key 含 total 不可得，故以"codex 存在且未标记"为条件全量重算：
   // 由增量同步以 upsert 方式刷新（总口径行 ts/model 不变），此处仅将明显双计的行做保守修正。
@@ -208,6 +220,69 @@ export class NexusStore implements StoreWriter {
       throw err
     }
     return inserted
+  }
+
+  /** 账号每日真实消耗 upsert（官方账单口径，多来源覆盖同一日时合并 requests/tokens/cost）。 */
+  upsertAccountUsage(
+    platform: string,
+    accountId: string,
+    rows: Array<{ day: string; requests: number; tokens: number; costAmount: number; currency: string }>
+  ): number {
+    if (rows.length === 0) return 0
+    const stmt = this.db.prepare(`
+      INSERT INTO account_usage_daily (platform, account_id, day, requests, tokens, cost_amount, currency, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(platform, account_id, day) DO UPDATE SET
+        requests = excluded.requests,
+        tokens = excluded.tokens,
+        cost_amount = excluded.cost_amount,
+        currency = excluded.currency,
+        updated_at = excluded.updated_at
+    `)
+    let n = 0
+    this.begin()
+    try {
+      const now = Date.now()
+      for (const r of rows) {
+        stmt.run(platform, accountId, r.day, r.requests, r.tokens, r.costAmount, r.currency, now)
+        n++
+      }
+      this.commit()
+    } catch (err) {
+      this.rollback()
+      throw err
+    }
+    return n
+  }
+
+  /** 查询账号每日消耗（近 days 天，按日升序）。 */
+  queryAccountUsage(
+    platform: string,
+    accountId: string,
+    days: number
+  ): Array<{ day: string; requests: number; tokens: number; costAmount: number; currency: string }> {
+    const since = new Date(Date.now() - days * 86400_000)
+    const p = (n: number): string => String(n).padStart(2, '0')
+    const sinceDay = `${since.getFullYear()}-${p(since.getMonth() + 1)}-${p(since.getDate())}`
+    const rows = this.db
+      .prepare(
+        `SELECT day, requests, tokens, cost_amount, currency FROM account_usage_daily
+         WHERE platform = ? AND account_id = ? AND day >= ? ORDER BY day ASC`
+      )
+      .all(platform, accountId, sinceDay) as Array<{
+      day: string
+      requests: number
+      tokens: number
+      cost_amount: number
+      currency: string
+    }>
+    return rows.map((r) => ({
+      day: r.day,
+      requests: Number(r.requests),
+      tokens: Number(r.tokens),
+      costAmount: Number(r.cost_amount),
+      currency: String(r.currency)
+    }))
   }
 
   // ── sync_state ──

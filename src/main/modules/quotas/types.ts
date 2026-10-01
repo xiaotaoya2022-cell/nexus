@@ -7,9 +7,9 @@
 // - 所有端点/路径常量必须附 cockpit 源码证据（文件:行），见 docs/research/v2/quota-integration-spec.md。
 // 视图类型（QuotaWindow/PlatformQuota/AccountQuotaView）定义在 @shared/quotas，此处 re-export 保持契约单一。
 
-import type { AccountQuotaView, PlatformQuota, QuotaWindow } from '@shared/quotas'
+import type { AccountQuotaView, AccountUsagePoint, PlatformQuota, QuotaWindow } from '@shared/quotas'
 
-export type { AccountQuotaView, PlatformQuota, QuotaWindow }
+export type { AccountQuotaView, AccountUsagePoint, PlatformQuota, QuotaWindow }
 
 export interface DiscoveredCredential {
   kind: 'oauth' | 'apikey'
@@ -48,6 +48,11 @@ export interface PlatformIntegration {
   oauthLogin?(): Promise<OAuthSession>
   /** 用凭据拉配额。401/403 时抛 QuotaAuthError 以便引擎标记需要重登。 */
   fetchQuota(cred: DiscoveredCredential): Promise<PlatformQuota>
+  /**
+   * 可选：拉账号级每日真实消耗（官方账单口径，如 DeepSeek usage API）。
+   * 引擎把结果交给 onUsage 落库，供账号面板绘制趋势。
+   */
+  fetchUsage?(cred: DiscoveredCredential): Promise<AccountUsagePoint[]>
   /** 刷新 oauth 凭据（若平台有 refresh 端点）；不支持则原样返回 */
   refreshCredential?(cred: DiscoveredCredential): Promise<DiscoveredCredential>
 }

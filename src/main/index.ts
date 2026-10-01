@@ -12,10 +12,10 @@ import { ZcodeManager } from './modules/zcode/manager'
 import { DshBridge } from './modules/dsh/bridge'
 import { CockpitBridge } from './modules/cockpit/bridge'
 import { QuotaEngine } from './modules/quotas/engine'
+import { logger } from './modules/shared/logger'
 import { PLATFORM_INTEGRATIONS } from './modules/quotas/platforms/registry'
 import { RemoteServer } from './modules/remote/server'
 import { registerIpc, broadcastSyncProgress } from './ipc/register'
-import { logger } from './modules/shared/logger'
 
 let mainWindow: BrowserWindow | null = null
 let store: NexusStore | null = null
@@ -183,6 +183,14 @@ app.whenReady()
     remote.broadcastPush('alert', alert)
   })
   quota.registerIntegrations(PLATFORM_INTEGRATIONS)
+  // 账号级每日真实消耗（官方账单）落 Nexus 库
+  quota.setUsageSink((platform, accountId, rows) => {
+    try {
+      store?.upsertAccountUsage(platform, accountId, rows)
+    } catch (err) {
+      logger.warn('quota.usage_sink_failed', { platform, error: err instanceof Error ? err.message : String(err) })
+    }
+  })
   let remoteSecret = store.getSetting('remoteSecret')
   if (!remoteSecret) {
     remoteSecret = randomBytes(32).toString('hex')

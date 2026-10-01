@@ -26,6 +26,15 @@ export interface AccountQuotaView {
   error?: string
 }
 
+/** 账号级每日真实消耗（官方账单口径，如 DeepSeek 开放平台 usage API） */
+export interface AccountUsagePoint {
+  day: string // YYYY-MM-DD（平台时区）
+  requests: number
+  tokens: number // 全部 token 类型合计（响应+缓存命中+未命中）
+  costAmount: number // 花费数额（配 currency）
+  currency: string // 'CNY' | 'USD'
+}
+
 export interface PlatformMetaView {
   id: string
   label: string

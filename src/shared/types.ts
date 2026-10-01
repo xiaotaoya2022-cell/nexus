@@ -151,6 +151,7 @@ export interface NexusApi {
   quotaLogin(platform: string): Promise<void>
   quotaLogout(platform: string, accountId: string): Promise<void>
   quotaRefresh(): Promise<import('./quotas').AccountQuotaView[]>
+  getAccountUsage(platform: string, accountId: string, days: number): Promise<import('./quotas').AccountUsagePoint[]>
   getDshStatus(): Promise<{ available: boolean; degraded: boolean; port: number; sessionCount: number; detail?: string }>
   /** DSH 本地会话（含每会话 token 消耗聚合），来自 Nexus 库，不依赖 DSH 运行 */
   getDshSessions(): Promise<DshSessionRow[]>

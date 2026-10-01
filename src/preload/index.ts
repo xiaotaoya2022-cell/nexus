@@ -33,6 +33,8 @@ const api: NexusApi = {
   quotaLogout: (platform: string, accountId: string) =>
     ipcRenderer.invoke('nexus:quotaLogout', platform, accountId),
   quotaRefresh: () => ipcRenderer.invoke('nexus:quotaRefresh'),
+  getAccountUsage: (platform: string, accountId: string, days: number) =>
+    ipcRenderer.invoke('nexus:getAccountUsage', platform, accountId, days),
   getDshStatus: () => ipcRenderer.invoke('nexus:getDshStatus'),
   getDshSessions: () => ipcRenderer.invoke('nexus:getDshSessions'),
   sendDshPrompt: (sessionId: string | null, text: string) =>

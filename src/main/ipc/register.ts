@@ -231,6 +231,13 @@ export function registerIpc(deps: IpcDeps): void {
     }
   })
   ipcMain.handle('nexus:quotaRefresh', async () => deps.quota.refreshNow())
+  ipcMain.handle('nexus:getAccountUsage', (_e, platform: unknown, accountId: unknown, days: unknown) => {
+    const p = typeof platform === 'string' && platform.length <= 64 ? platform : ''
+    const a = typeof accountId === 'string' && accountId.length <= 256 ? accountId : ''
+    const d = Number.isFinite(Number(days)) ? Math.min(365, Math.max(1, Number(days))) : 30
+    if (!p || !a) return []
+    return deps.store.queryAccountUsage(p, a, d)
+  })
   ipcMain.handle('nexus:getDshStatus', async () => {
     const st = await deps.dsh.status()
     let sessionCount = 0

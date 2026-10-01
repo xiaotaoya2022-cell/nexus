@@ -9,8 +9,8 @@ import { useDashboard } from './useDashboard'
 import { EChart } from './charts/EChart'
 import { AgentSidebar } from './components/AgentSidebar'
 import { SessionsPanel } from './components/SessionsPanel'
-import { SystemCard } from './components/SystemCard'
-import { QuotaCard } from './components/QuotaCard'
+import { SystemPill } from './components/SystemPill'
+import { AccountPanel } from './components/AccountPanel'
 import { AnimatedNumber } from './components/RollingNumber'
 import {
   ChartCard,
@@ -58,8 +58,6 @@ export default function App(): JSX.Element {
   const [remoteOn, setRemoteOn] = useState(false)
   const [remoteStatus, setRemoteStatus] = useState<Awaited<ReturnType<typeof nexus.getRemoteStatus>> | null>(null)
   const [pairing, setPairing] = useState<Awaited<ReturnType<typeof nexus.regeneratePairing>> | null>(null)
-  const [quotaPlatforms, setQuotaPlatforms] = useState<Awaited<ReturnType<typeof nexus.quotaPlatforms>>>([])
-  const [quotaAlert, setQuotaAlert] = useState(90)
   const [dshStatus, setDshStatus] = useState<Awaited<ReturnType<typeof nexus.getDshStatus>> | null>(null)
   const [dshSessions, setDshSessions] = useState<Awaited<ReturnType<typeof nexus.getDshSessions>>>([])
 
@@ -126,10 +124,8 @@ export default function App(): JSX.Element {
       const s = await nexus.getRemoteStatus()
       setRemoteStatus(s)
       setRemoteOn(s.enabled)
-      setQuotaPlatforms(await nexus.quotaPlatforms())
       setDshStatus(await nexus.getDshStatus())
       void nexus.getDshSessions().then(setDshSessions)
-      setQuotaAlert(await nexus.getQuotaAlertThreshold())
     }
     setSettingsOpen((v) => !v)
   }
@@ -233,6 +229,8 @@ export default function App(): JSX.Element {
             }}
           />
         </div>
+        <SystemPill />
+        <AccountPanel />
         <IconButton style={{WebkitAppRegion: "no-drag"} as React.CSSProperties} title="立即同步" onClick={() => void nexus.syncNow()} spinning={sync.phase === 'running'}>
           <RefreshIcon />
         </IconButton>
@@ -276,67 +274,6 @@ export default function App(): JSX.Element {
             >
               打开数据目录
             </button>
-
-            <div className="my-3 h-px bg-hairline" />
-            <div className="mb-1 text-ui-xs text-foreground-subtle">账号与配额</div>
-            {quotaPlatforms.length === 0 ? (
-              <div className="text-ui-xs text-foreground-subtlest">加载中…</div>
-            ) : (
-              <div className="flex flex-col gap-1">
-                {quotaPlatforms.map((p) => (
-                  <div key={p.id} className="flex items-center justify-between gap-2">
-                    <span className="min-w-0 truncate text-ui-sm text-foreground" title={p.id}>
-                      {p.label}
-                      {p.accountCount > 0 && (
-                        <span className="ml-1 font-mono text-ui-xs text-foreground-subtlest">
-                          {p.accountCount} 账号
-                        </span>
-                      )}
-                    </span>
-                    {p.oauthSupported ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void nexus
-                            .quotaLogin(p.id)
-                            .then(() => setToast(`${p.label} 登录成功，配额稍后自动刷新`))
-                            .catch((err) =>
-                              setToast(`登录失败：${err instanceof Error ? err.message : String(err)}`)
-                            )
-                        }}
-                        className="h-6 shrink-0 rounded-lg bg-secondary px-2 text-ui-xs text-foreground transition-colors duration-150 hover:bg-surface-hover"
-                      >
-                        登录
-                      </button>
-                    ) : (
-                      <span className="shrink-0 text-ui-xs text-foreground-subtlest">待接入</span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-            <div className="mt-1 text-ui-xs text-foreground-subtlest">
-              Cursor / Codex CLI 的本机登录态会自动导入；其余平台登录能力陆续接入。
-            </div>
-            <div className="mt-2 flex items-center justify-between gap-2">
-              <span className="text-ui-xs text-foreground-subtle">配额告警阈值</span>
-              <select
-                value={quotaAlert}
-                onChange={(e) => {
-                  const v = Number(e.target.value)
-                  void nexus.setQuotaAlertThreshold(v).then((nv) => {
-                    setQuotaAlert(nv)
-                    setToast(`配额告警阈值设为 ${nv}%`)
-                  })
-                }}
-                className="h-6 rounded-lg border border-border bg-card px-1.5 text-ui-xs text-foreground"
-              >
-                <option value={70}>70%</option>
-                <option value={80}>80%</option>
-                <option value={90}>90%（默认）</option>
-                <option value={95}>95%</option>
-              </select>
-            </div>
 
             <div className="my-3 h-px bg-hairline" />
             <div className="mb-1 text-ui-xs text-foreground-subtle">DeepSeek Harness</div>
@@ -486,16 +423,14 @@ export default function App(): JSX.Element {
           ) : totalTokens === 0 && data.sessions.length === 0 ? (
             <EmptyState
               title="暂无用量数据"
-              description={`当前范围「${RANGE_OPTIONS.find((o) => o.key === range)?.label ?? range}」内未发现 Token 记录。切换右上角时间范围，或确认对应 Agent 已产生对话后等待下一轮同步（60 秒）。`}
+              description={
+                agent
+                  ? `当前筛选「${agentLabels.get(agent) ?? agent}」+ 范围「${RANGE_OPTIONS.find((o) => o.key === range)?.label ?? range}」内没有 Token 记录。点击侧栏「全部 Agent」取消筛选，或换一个时间范围。`
+                  : `当前范围「${RANGE_OPTIONS.find((o) => o.key === range)?.label ?? range}」内未发现 Token 记录。切换右上角时间范围，或确认对应 Agent 已产生对话后等待下一轮同步（60 秒）。`
+              }
             />
           ) : (
             <>
-              {/* 系统状态 */}
-              <SystemCard />
-
-              {/* 账号配额 */}
-              <QuotaCard />
-
               {/* KPI 矩阵 */}
               <div className="grid grid-cols-2 gap-4 2xl:grid-cols-4">
                 <KpiCard
