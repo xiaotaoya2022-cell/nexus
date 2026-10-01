@@ -70,7 +70,8 @@ function fmtLocal(d: Date): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
-/** 无痕登录窗口：非持久分区（内存态，关窗即弃），不污染系统浏览器与已持久会话。 */
+/** 无痕登录窗口：非持久分区（内存态，关窗即弃），不污染系统浏览器与已持久会话。
+ *  置顶：Windows 前台锁会把后台进程的窗口压到主窗口后面（用户视角="没反应"）。 */
 function openIncognitoWindow(url: string, title: string, id: string): BrowserWindow {
   const partition = `incognito-login-${id}-${Date.now()}`
   const win = new BrowserWindow({
@@ -78,6 +79,7 @@ function openIncognitoWindow(url: string, title: string, id: string): BrowserWin
     width: 1020,
     height: 720,
     autoHideMenuBar: true,
+    alwaysOnTop: true,
     title,
     webPreferences: {
       session: electronSession.fromPartition(partition), // 无 persist: 前缀 = 纯内存
@@ -86,6 +88,8 @@ function openIncognitoWindow(url: string, title: string, id: string): BrowserWin
       sandbox: true
     }
   })
+  win.show()
+  win.focus()
   void win.loadURL(url)
   return win
 }

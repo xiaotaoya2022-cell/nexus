@@ -252,6 +252,9 @@ export const integration: PlatformIntegration = {
       width: 1020,
       height: 720,
       autoHideMenuBar: true,
+      // Windows 前台锁：后台进程创建的窗口会被压到主窗口后面（用户视角="没反应"），
+      // 置顶确保登录窗口一定可见；登录完成窗口销毁，置顶随之消失。
+      alwaysOnTop: true,
       title: mode === 'incognito' ? '登录 DeepSeek 开放平台（无痕）' : '登录 DeepSeek 开放平台',
       webPreferences: {
         session: (await import('electron')).session.fromPartition(partition),
@@ -260,6 +263,8 @@ export const integration: PlatformIntegration = {
         sandbox: true
       }
     })
+    win.show()
+    win.focus()
     await win.loadURL(`${ENDPOINT}/sign_in`)
     const deadline = Date.now() + LOGIN_TIMEOUT_MS
     while (Date.now() < deadline) {
@@ -290,7 +295,7 @@ export const integration: PlatformIntegration = {
       await new Promise((res) => setTimeout(res, LOGIN_POLL_MS))
     }
     if (!win.isDestroyed()) win.destroy()
-    throw new Error('登录超时：未在 5 分钟内完成 DeepSeek 登录')
+    throw new Error('登录未完成：窗口已关闭或超过 5 分钟')
   },
 
   /** 余额 + 累计消费 + 近 30 天用量（extra 文案）；fetchUsage 负责逐日落库。 */

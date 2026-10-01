@@ -39,6 +39,7 @@ export const integration: PlatformIntegration = {
         width: 1020,
         height: 720,
         autoHideMenuBar: true,
+        alwaysOnTop: true, // 前台锁：防被主窗口压住
         title: '登录 WorkBuddy（无痕）',
         webPreferences: {
           session: electronSession.fromPartition(`incognito-login-workbuddy-${Date.now()}`),
@@ -47,6 +48,8 @@ export const integration: PlatformIntegration = {
           sandbox: true
         }
       })
+      win.show()
+      win.focus()
       void win.loadURL(loginUrl)
     } else {
       await shell.openExternal(loginUrl)

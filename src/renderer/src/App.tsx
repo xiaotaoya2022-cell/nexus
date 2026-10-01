@@ -210,7 +210,15 @@ export default function App(): JSX.Element {
   return (
     <div className="flex h-full flex-col bg-background text-foreground">
       {/* 顶栏 */}
-      <header style={{WebkitAppRegion: "drag"} as React.CSSProperties} className="relative flex h-12 shrink-0 items-center gap-4 border-b border-border bg-panel px-4">
+      {/* 顶栏：宽度裁到 WCO 标题栏区内（titlebar-area-width），
+          防止右侧按钮滑进窗口控制钮下方被盖住（v0.2.5 实测主题/导出/设置被盖） */}
+      <header
+        style={{
+          WebkitAppRegion: "drag",
+          width: "env(titlebar-area-width, 100%)"
+        } as React.CSSProperties}
+        className="relative flex h-12 shrink-0 items-center gap-4 border-b border-border bg-panel px-4"
+      >
         <div className="flex items-baseline gap-2">
           <span className="text-ui-base font-medium">Nexus</span>
           <span className="text-ui-sm text-foreground-subtlest">本地算力监控</span>
