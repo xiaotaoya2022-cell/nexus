@@ -91,6 +91,18 @@ export interface SessionRow {
   requests: number
 }
 
+/** DSH（DeepSeek Harness）本地会话行：settings 面板展示用 */
+export interface DshSessionRow {
+  sessionId: string
+  title: string | null
+  projectDir: string | null
+  model: string | null
+  startedAt: number | null
+  updatedAt: number | null
+  tokens: number
+  requests: number
+}
+
 export interface SyncProgress {
   phase: 'idle' | 'running' | 'done' | 'error'
   agent: string | null
@@ -140,8 +152,8 @@ export interface NexusApi {
   quotaLogout(platform: string, accountId: string): Promise<void>
   quotaRefresh(): Promise<import('./quotas').AccountQuotaView[]>
   getDshStatus(): Promise<{ available: boolean; degraded: boolean; port: number; sessionCount: number; detail?: string }>
-  getDshSessions(): Promise<Array<{ sessionId: string; workspaceLabel: string; startedAt: number | null; updatedAt: number | null; messageCount: number; title: string | null }>>
-  getDshSessions(): Promise<Array<{ sessionId: string; workspace?: string; updatedAt?: number | null }>>
+  /** DSH 本地会话（含每会话 token 消耗聚合），来自 Nexus 库，不依赖 DSH 运行 */
+  getDshSessions(): Promise<DshSessionRow[]>
   sendDshPrompt(sessionId: string | null, text: string): Promise<{ sessionId: string }>
   cancelDshSession(sessionId: string): Promise<void>
   getSavedRange(): Promise<RangeKey>

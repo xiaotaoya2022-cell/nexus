@@ -246,3 +246,13 @@ body {
     animation: none;
   }
 }
+
+/* 无边框窗口：顶栏为拖动区（inline -webkit-app-region: drag），
+   交互元素一律恢复可点击——CSS 兜底，防止内联样式遗漏导致按钮点不动 */
+header button,
+header select,
+header input,
+header a,
+header [role='button'] {
+  -webkit-app-region: no-drag;
+}

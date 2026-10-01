@@ -13,10 +13,10 @@ import type { SystemCollector } from '../modules/system/collector'
 import type { ZcodeManager } from '../modules/zcode/manager'
 import type { DshBridge } from '../modules/dsh/bridge'
 import type { CockpitBridge } from '../modules/cockpit/bridge'
-import { DshLocalSessionReader } from '../modules/dsh/sessions-reader'
 import type { QuotaEngine } from '../modules/quotas/engine'
 import type { RemoteServer } from '../modules/remote/server'
 import { rangeStartMs } from '../modules/aggregator/application/query-service'
+import { TOTAL_EXPR } from '../modules/aggregator/infrastructure/store'
 
 const ACTIVE_WINDOW_MS = 15 * 60_000
 const IDLE_WINDOW_MS = 24 * 60 * 60_000
@@ -30,7 +30,6 @@ export interface IpcDeps {
   system: SystemCollector
   zcode: ZcodeManager
   dsh: DshBridge
-  dshLocal: DshLocalSessionReader
   cockpit: CockpitBridge
   quota: QuotaEngine
   remote: RemoteServer
@@ -100,24 +99,7 @@ function buildAgentInfos(deps: IpcDeps): AgentInfo[] {
     }
   }
 
-  // DSH：本地 zstd 会话（不依赖进程运行）
-  let dshEntry: AgentInfo | null = null
-  if (deps.dshLocal.available()) {
-    const localSessions = deps.dshLocal.listSummaries()
-    const total = localSessions.length
-    const latest = localSessions.reduce((m, s2) => Math.max(m, s2.updatedAt ?? 0), 0)
-    dshEntry = {
-      id: 'dsh',
-      label: 'DeepSeek Harness',
-      detected: true,
-      status: latest > 0 && now - latest <= IDLE_WINDOW_MS ? 'idle' : 'offline',
-      todayTokens: 0,
-      todayRequests: 0,
-      lastActivityAt: latest || null,
-      sessionCount: total,
-      note: `${total} 本地会话（zstd）`
-    }
-  }
+  // DSH 已并入适配器体系（DshAdapter 直接解析本地 zstd 会话），无需特殊分支
 
   const infos: AgentInfo[] = []
   for (const [id, meta] of known) {
@@ -149,7 +131,6 @@ function buildAgentInfos(deps: IpcDeps): AgentInfo[] {
       note,
     })
   }
-  if (dshEntry) infos.push(dshEntry)
   // 有数据的排前，其余按名称
   return infos.sort((a, b) => {
     const ta = a.todayTokens + a.sessionCount
@@ -263,9 +244,30 @@ export function registerIpc(deps: IpcDeps): void {
     return { ...st, sessionCount }
   })
   ipcMain.handle('nexus:getDshSessions', async () => {
-    // 本地 zstd 会话枚举：不依赖 DSH 运行（数据在本机即见）
+    // 本地 zstd 会话（DshAdapter 已落库）：从 Nexus 库聚合每会话消耗，不依赖 DSH 运行
     try {
-      return await deps.dshLocal.listAll(120)
+      const rows = deps.store.db
+        .prepare(
+          `SELECT s.session_id, s.title, s.project_dir, s.model, s.started_at, s.updated_at,
+                  COALESCE(SUM(${TOTAL_EXPR}), 0) AS tokens, COUNT(u.id) AS requests
+           FROM sessions s
+           LEFT JOIN usage_records u ON u.agent = s.agent AND u.session_id = s.session_id
+           WHERE s.agent = 'dsh'
+           GROUP BY s.agent, s.session_id
+           ORDER BY COALESCE(s.updated_at, s.started_at, 0) DESC
+           LIMIT 120`
+        )
+        .all() as Array<Record<string, unknown>>
+      return rows.map((r) => ({
+        sessionId: String(r.session_id),
+        title: r.title == null ? null : String(r.title),
+        projectDir: r.project_dir == null ? null : String(r.project_dir),
+        model: r.model == null ? null : String(r.model),
+        startedAt: r.started_at == null ? null : Number(r.started_at),
+        updatedAt: r.updated_at == null ? null : Number(r.updated_at),
+        tokens: Number(r.tokens) || 0,
+        requests: Number(r.requests) || 0
+      }))
     } catch {
       return []
     }

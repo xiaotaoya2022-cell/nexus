@@ -12,6 +12,7 @@ import { CodexAdapter } from '../infrastructure/codex'
 import { AntigravityAdapter } from '../infrastructure/antigravity'
 import { ClaudeCodeAdapter } from '../infrastructure/claude-code'
 import { CodeBuddyAdapter } from '../infrastructure/codebuddy'
+import { DshAdapter } from '../infrastructure/dsh'
 
 export function createAdapters(store: StoreWriter): AgentAdapter[] {
   return [
@@ -19,7 +20,8 @@ export function createAdapters(store: StoreWriter): AgentAdapter[] {
     new CodexAdapter(store),
     new AntigravityAdapter(store),
     new ClaudeCodeAdapter(store),
-    new CodeBuddyAdapter(store)
+    new CodeBuddyAdapter(store),
+    new DshAdapter(store)
   ]
 }
 

@@ -129,7 +129,6 @@ export default function App(): JSX.Element {
       setQuotaPlatforms(await nexus.quotaPlatforms())
       setDshStatus(await nexus.getDshStatus())
       void nexus.getDshSessions().then(setDshSessions)
-      if (dshStatus == null || true) void nexus.getDshSessions().then(setDshSessions)
       setQuotaAlert(await nexus.getQuotaAlertThreshold())
     }
     setSettingsOpen((v) => !v)
@@ -355,48 +354,33 @@ export default function App(): JSX.Element {
             {dshStatus?.detail && (
               <div className="text-ui-xs text-foreground-subtlest">{dshStatus.detail}</div>
             )}
-            {dshStatus?.available && dshSessions.length > 0 && (
+            {dshSessions.length > 0 && (
               <div className="mt-2 flex flex-col gap-0.5">
-                <div className="text-ui-xs text-foreground-subtle">会话（点击取消）：</div>
+                <div className="text-ui-xs text-foreground-subtle">
+                  本地会话（{dshSessions.length}）· 点击打开所在目录：
+                </div>
                 {dshSessions.slice(0, 8).map((sess) => (
                   <button
                     key={sess.sessionId}
                     type="button"
-                    title={`取消会话 ${sess.sessionId}`}
+                    title={`${sess.title ?? sess.projectDir ?? sess.sessionId}\n${sess.requests} 次请求 · ${fullNumber(sess.tokens)} tokens${sess.projectDir ? `\n${sess.projectDir}` : ''}`}
                     onClick={() => {
-                      void nexus
-                        .cancelDshSession(sess.sessionId)
-                        .then(() => nexus.getDshSessions().then(setDshSessions))
-                        .catch((err) => setToast(`取消失败：${err instanceof Error ? err.message : String(err)}`))
+                      if (!sess.projectDir) return
+                      void nexus.openPath(sess.projectDir).catch(() => undefined)
                     }}
-                    className="flex items-center justify-between rounded-md px-1.5 py-0.5 text-left text-ui-xs text-foreground-subtle transition-colors duration-150 hover:bg-hover hover:text-foreground"
+                    className="flex items-center justify-between gap-2 rounded-md px-1.5 py-0.5 text-left text-ui-xs text-foreground-subtle transition-colors duration-150 hover:bg-hover hover:text-foreground"
                   >
-                    <span className="truncate">{sess.sessionId.slice(0, 12)}…</span>
-                    <span className="text-destructive">取消</span>
+                    <span className="min-w-0 flex-1 truncate">
+                      {sess.title ?? sess.projectDir ?? `${sess.sessionId.slice(0, 12)}…`}
+                    </span>
+                    <span className="shrink-0 font-mono tabular-nums text-foreground-subtlest">
+                      {compactNumber(sess.tokens)} tk
+                    </span>
                   </button>
                 ))}
-              </div>
-            )}
-            {dshStatus?.available && dshSessions.length > 0 && (
-              <div className="mt-2 flex flex-col gap-0.5">
-                <div className="text-ui-xs text-foreground-subtle">会话（点击取消）：</div>
-                {dshSessions.slice(0, 6).map((sess) => (
-                  <button
-                    key={sess.sessionId}
-                    type="button"
-                    title={`取消会话 ${sess.sessionId}`}
-                    onClick={() => {
-                      void nexus
-                        .cancelDshSession(sess.sessionId)
-                        .then(() => nexus.getDshSessions().then(setDshSessions))
-                        .catch((err) => setToast(`取消失败：${err instanceof Error ? err.message : String(err)}`))
-                    }}
-                    className="flex items-center justify-between rounded-md px-1.5 py-0.5 text-left text-ui-xs text-foreground-subtle transition-colors duration-150 hover:bg-hover hover:text-foreground"
-                  >
-                    <span className="truncate">{sess.sessionId.slice(0, 12)}…</span>
-                    <span className="text-destructive">取消</span>
-                  </button>
-                ))}
+                <div className="text-ui-xs text-foreground-subtlest">
+                  消耗随每 60 秒增量同步累计；会话明细也可在右侧「会话明细」栏查看。
+                </div>
               </div>
             )}
 
@@ -502,7 +486,7 @@ export default function App(): JSX.Element {
           ) : totalTokens === 0 && data.sessions.length === 0 ? (
             <EmptyState
               title="暂无用量数据"
-              description="未在任何已接入 Agent 的本地数据源中发现 Token 记录。请确认对应 Agent 已产生对话，或切换时间范围。"
+              description={`当前范围「${RANGE_OPTIONS.find((o) => o.key === range)?.label ?? range}」内未发现 Token 记录。切换右上角时间范围，或确认对应 Agent 已产生对话后等待下一轮同步（60 秒）。`}
             />
           ) : (
             <>

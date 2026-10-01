@@ -1,6 +1,6 @@
 {
   "name": "nexus",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Nexus — 本地 AI Agent 算力监控中心：读取本机 AI Agent 的 Token/会话/工具调用数据，汇总为单一桌面看板",
   "main": "./out/main/index.js",
   "author": "xiaotaoya2022",
@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "echarts": "^6.0.0",
+    "fzstd": "^0.1.1",
     "qrcode": "^1.5.4",
     "systeminformation": "^5.33.13",
     "ws": "^8.21.3"
