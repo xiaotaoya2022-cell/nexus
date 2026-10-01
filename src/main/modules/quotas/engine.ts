@@ -7,7 +7,7 @@ import type {
   AccountQuotaView,
   PlatformMetaView
 } from '@shared/quotas'
-import type { DiscoveredCredential, OAuthSession, PlatformIntegration } from './types'
+import type { DiscoveredCredential, LoginMode, OAuthSession, PlatformIntegration } from './types'
 import { QuotaAuthError } from './types'
 import { logger } from '@main/modules/shared/logger'
 
@@ -125,10 +125,10 @@ export class QuotaEngine {
   }
 
   // ── 登录/登出 ──
-  async login(platformId: string): Promise<void> {
+  async login(platformId: string, mode: LoginMode = 'normal'): Promise<void> {
     const integration = this.integrations.find((p) => p.id === platformId)
     if (!integration?.oauthLogin) throw new Error('该平台未支持应用内登录，请先在对应 Agent 内登录后自动导入')
-    const session = await integration.oauthLogin()
+    const session = await integration.oauthLogin(mode)
     const auth = this.loadAuth()
     const list = auth.sessions[platformId] ?? []
     const filtered = list.filter((s) => s.accountId !== session.accountId)

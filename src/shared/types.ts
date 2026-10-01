@@ -148,7 +148,7 @@ export interface NexusApi {
   revokeDevice(deviceId: string): Promise<void>
   quotaPlatforms(): Promise<import('./quotas').PlatformMetaView[]>
   quotaAccounts(): Promise<import('./quotas').AccountQuotaView[]>
-  quotaLogin(platform: string): Promise<void>
+  quotaLogin(platform: string, mode?: 'normal' | 'incognito'): Promise<void>
   quotaLogout(platform: string, accountId: string): Promise<void>
   quotaRefresh(): Promise<import('./quotas').AccountQuotaView[]>
   getAccountUsage(platform: string, accountId: string, days: number): Promise<import('./quotas').AccountUsagePoint[]>

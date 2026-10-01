@@ -8,8 +8,8 @@
 // 凭据：本地导入返回 []（登录态在云端），走应用内 OAuth。
 
 import { randomBytes } from 'node:crypto'
-import { shell } from 'electron'
-import type { DiscoveredCredential, OAuthSession, PlatformIntegration, PlatformQuota } from '../types'
+import { BrowserWindow, session as electronSession, shell } from 'electron'
+import type { DiscoveredCredential, LoginMode, OAuthSession, PlatformIntegration, PlatformQuota } from '../types'
 import type { AccountUsagePoint } from '../types'
 import { QuotaAuthError } from '../types'
 import { fetchRequestUsageDaily } from './request-usage'
@@ -27,19 +27,43 @@ export const integration: PlatformIntegration = {
     return []
   },
 
-  /** 应用内 OAuth（cockpit workbuddy_oauth.rs：login?state= → 浏览器 → 轮询 auth/token）。 */
-  async oauthLogin(): Promise<OAuthSession> {
+  /** 应用内 OAuth（cockpit workbuddy_oauth.rs：login?state= → 浏览器 → 轮询 auth/token）。
+   *  incognito=应用内无痕窗口，适合登录第二个账号。 */
+  async oauthLogin(mode: LoginMode = 'normal'): Promise<OAuthSession> {
     const state = randomBytes(16).toString('hex')
-    await shell.openExternal(`${ENDPOINT}/login?state=${state}`)
+    const loginUrl = `${ENDPOINT}/login?state=${state}`
+    let win: BrowserWindow | null = null
+    if (mode === 'incognito') {
+      win = new BrowserWindow({
+        show: true,
+        width: 1020,
+        height: 720,
+        autoHideMenuBar: true,
+        title: '登录 WorkBuddy（无痕）',
+        webPreferences: {
+          session: electronSession.fromPartition(`incognito-login-workbuddy-${Date.now()}`),
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true
+        }
+      })
+      void win.loadURL(loginUrl)
+    } else {
+      await shell.openExternal(loginUrl)
+    }
     const deadline = Date.now() + LOGIN_TIMEOUT_MS
     for (;;) {
-      if (Date.now() > deadline) throw new Error('WorkBuddy 登录超时（5 分钟）')
+      if (Date.now() > deadline) {
+        if (win != null && !win.isDestroyed()) win.destroy()
+        throw new Error('WorkBuddy 登录超时（5 分钟）')
+      }
       await new Promise((r) => setTimeout(r, POLL_MS))
       const res = await fetchJson(`${ENDPOINT}/auth/token?state=${encodeURIComponent(state)}`)
       if (res.status !== 200) continue
       const data = (res.body as { data?: Record<string, unknown> })?.data
       const accessToken = pickString(data, ['accessToken', 'access_token'])
       if (!accessToken) continue
+      if (win != null && !win.isDestroyed()) win.destroy()
       const expiresAt = Number(data?.expires_at ?? data?.expiresAt) || null
       return {
         accountId: pickString(data, ['uid', 'userId', 'email']) ?? 'workbuddy',

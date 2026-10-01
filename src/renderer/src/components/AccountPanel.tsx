@@ -209,11 +209,11 @@ export function AccountPanel(): JSX.Element {
     }
   }
 
-  const login = async (platformId: string, label: string): Promise<void> => {
+  const login = async (platformId: string, label: string, mode: 'normal' | 'incognito'): Promise<void> => {
     setLoggingIn(platformId)
     setError(null)
     try {
-      await nexus.quotaLogin(platformId)
+      await nexus.quotaLogin(platformId, mode)
       await load()
     } catch (err) {
       setError(`${label} 登录失败：${err instanceof Error ? err.message : String(err)}`)
@@ -238,24 +238,34 @@ export function AccountPanel(): JSX.Element {
               </IconButton>
             </div>
 
-            {/* 平台登录入口（未登录置灰为"待接入/需登录"） */}
+            {/* 平台登录入口：普通（系统浏览器）+ 无痕（应用内独立窗口）两种方式 */}
             <div className="mb-2 flex flex-wrap gap-1.5">
               {platforms.map((p) => {
                 const logged = accounts.some((a) => a.platform === p.id)
                 return p.oauthSupported ? (
-                  <button
-                    key={p.id}
-                    type="button"
-                    disabled={loggingIn !== null}
-                    onClick={() => void login(p.id, p.label)}
-                    className={`h-6 rounded-full border px-2 text-ui-xs transition-colors duration-150 ${
-                      logged
-                        ? 'border-border bg-surface text-foreground-subtle'
-                        : 'border-border bg-secondary text-foreground hover:bg-surface-hover'
-                    }`}
-                  >
-                    {loggingIn === p.id ? `${p.label} 登录中…` : logged ? `${p.label} · 已登录` : `登录 ${p.label}`}
-                  </button>
+                  <span key={p.id} className="inline-flex h-6 items-center overflow-hidden rounded-full border border-border">
+                    <button
+                      type="button"
+                      disabled={loggingIn !== null}
+                      onClick={() => void login(p.id, p.label, 'normal')}
+                      className={`h-6 px-2 text-ui-xs transition-colors duration-150 ${
+                        logged
+                          ? 'bg-surface text-foreground-subtle'
+                          : 'bg-secondary text-foreground hover:bg-surface-hover'
+                      }`}
+                    >
+                      {loggingIn === p.id ? `${p.label} 登录中…` : logged ? `${p.label} · 已登录` : `登录 ${p.label}`}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={loggingIn !== null}
+                      title="无痕登录：应用内独立窗口，不影响浏览器已登录态，可登录第二个账号"
+                      onClick={() => void login(p.id, p.label, 'incognito')}
+                      className="h-6 border-l border-border bg-surface px-1.5 text-ui-xs text-foreground-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-foreground"
+                    >
+                      无痕
+                    </button>
+                  </span>
                 ) : null
               })}
             </div>

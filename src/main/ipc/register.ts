@@ -220,9 +220,9 @@ export function registerIpc(deps: IpcDeps): void {
   // ── v2：账号与配额 ──
   ipcMain.handle('nexus:quotaPlatforms', () => deps.quota.listPlatformMeta())
   ipcMain.handle('nexus:quotaAccounts', () => deps.quota.listAccounts())
-  ipcMain.handle('nexus:quotaLogin', async (_e, platform: string) => {
+  ipcMain.handle('nexus:quotaLogin', async (_e, platform: string, mode: unknown) => {
     if (typeof platform === 'string' && /^[a-z0-9-]{1,32}$/.test(platform)) {
-      await deps.quota.login(platform)
+      await deps.quota.login(platform, mode === 'incognito' ? 'incognito' : 'normal')
     }
   })
   ipcMain.handle('nexus:quotaLogout', (_e, platform: string, accountId: string) => {

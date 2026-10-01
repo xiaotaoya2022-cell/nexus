@@ -33,6 +33,9 @@ export interface OAuthSession {
   expiresAt: number | null
 }
 
+/** 登录方式：normal=系统浏览器（复用已登录态）；incognito=应用内无痕窗口（登录第二个账号/另一版本） */
+export type LoginMode = 'normal' | 'incognito'
+
 export interface PlatformIntegration {
   id: string
   label: string
@@ -42,10 +45,10 @@ export interface PlatformIntegration {
    */
   discoverLocalCredentials(): Promise<DiscoveredCredential[]>
   /**
-   * 应用内 OAuth 登录（可选）：打开系统浏览器完成授权，回环回调换 token。
-   * 不支持的平台不实现（UI 显示"需在 Agent 内登录"）。
+   * 应用内 OAuth 登录（可选）：完成授权换 token。不支持的平台不实现。
+   * normal=打开系统浏览器（复用其登录态）；incognito=应用内无痕窗口（隔离会话）。
    */
-  oauthLogin?(): Promise<OAuthSession>
+  oauthLogin?(mode?: LoginMode): Promise<OAuthSession>
   /** 用凭据拉配额。401/403 时抛 QuotaAuthError 以便引擎标记需要重登。 */
   fetchQuota(cred: DiscoveredCredential): Promise<PlatformQuota>
   /**

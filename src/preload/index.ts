@@ -29,7 +29,8 @@ const api: NexusApi = {
   revokeDevice: (deviceId: string) => ipcRenderer.invoke('nexus:revokeDevice', deviceId),
   quotaPlatforms: () => ipcRenderer.invoke('nexus:quotaPlatforms'),
   quotaAccounts: () => ipcRenderer.invoke('nexus:quotaAccounts'),
-  quotaLogin: (platform: string) => ipcRenderer.invoke('nexus:quotaLogin', platform),
+  quotaLogin: (platform: string, mode?: 'normal' | 'incognito') =>
+    ipcRenderer.invoke('nexus:quotaLogin', platform, mode ?? 'normal'),
   quotaLogout: (platform: string, accountId: string) =>
     ipcRenderer.invoke('nexus:quotaLogout', platform, accountId),
   quotaRefresh: () => ipcRenderer.invoke('nexus:quotaRefresh'),

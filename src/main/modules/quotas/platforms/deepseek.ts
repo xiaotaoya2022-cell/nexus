@@ -16,7 +16,7 @@
 // 直接读 localStorage.userToken + __appKit_userInfo.id；刷新凭据=隐藏窗口静默重取。
 
 import { BrowserWindow } from 'electron'
-import type { AccountUsagePoint, DiscoveredCredential, OAuthSession, PlatformIntegration, PlatformQuota } from '../types'
+import type { AccountUsagePoint, DiscoveredCredential, LoginMode, OAuthSession, PlatformIntegration, PlatformQuota } from '../types'
 import { QuotaAuthError } from '../types'
 import type { QuotaWindow } from '@shared/quotas'
 import { fetchJson, pickNumber } from '../http'
@@ -241,17 +241,20 @@ export const integration: PlatformIntegration = {
     return []
   },
 
-  /** 应用内登录：打开平台登录页，SPA 完成后读回 userToken。 */
-  async oauthLogin(): Promise<OAuthSession> {
+  /** 应用内登录：打开平台登录页，SPA 完成后读回 userToken。
+   *  normal=persist 分区（保留登录态供静默续期）；incognito=非持久分区（第二个账号，凭据直接入库不依赖 cookie）。 */
+  async oauthLogin(mode: LoginMode = 'normal'): Promise<OAuthSession> {
     assertPlatformUrl(`${ENDPOINT}/sign_in`)
+    const partition =
+      mode === 'incognito' ? `incognito-deepseek-${Date.now()}` : PARTITION
     const win = new BrowserWindow({
       show: true,
       width: 1020,
       height: 720,
       autoHideMenuBar: true,
-      title: '登录 DeepSeek 开放平台',
+      title: mode === 'incognito' ? '登录 DeepSeek 开放平台（无痕）' : '登录 DeepSeek 开放平台',
       webPreferences: {
-        session: (await import('electron')).session.fromPartition(PARTITION),
+        session: (await import('electron')).session.fromPartition(partition),
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true
