@@ -36,18 +36,24 @@ function windowBar(label: string, used: number | null, remaining: number | null)
   )
 }
 
-/** 账号每日用量小图（近30天 tokens 柱 + 悬浮花费） */
+/** 账号每日用量小图：tokens 口径画 token 柱，credits 口径（tokens=0）画 credit 柱 */
 function UsageMiniChart({ points }: { points: AccountUsagePoint[] }): JSX.Element | null {
   const tokens = chartTokens()
   if (points.length === 0) return null
-  const filled = points.map((p) => ({ bucket: p.day, total: p.tokens, cost: p.costAmount, currency: p.currency }))
+  const tokenSum = points.reduce((a, p) => a + p.tokens, 0)
+  const creditMode = tokenSum === 0
+  const filled = points.map((p) => ({
+    bucket: p.day,
+    total: creditMode ? p.costAmount : p.tokens
+  }))
   const option: EChartsOption = {
     animationDuration: 200,
     grid: { top: 6, right: 8, left: 8, bottom: 0, containLabel: true },
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow', shadowStyle: { color: 'rgba(128,128,128,0.08)' } },
-      valueFormatter: (v) => fullNumber(Number(v))
+      valueFormatter: (v) =>
+        creditMode ? `${Number(v).toFixed(2)} credits` : fullNumber(Number(v))
     },
     xAxis: {
       type: 'category',
@@ -68,7 +74,7 @@ function UsageMiniChart({ points }: { points: AccountUsagePoint[] }): JSX.Elemen
         itemStyle: { color: colorForIndex(tokens, 0), borderRadius: 2 },
         barMaxWidth: 10,
         tooltip: {
-          valueFormatter: (v) => `${fullNumber(Number(v))} tokens`
+          valueFormatter: (v) => (creditMode ? `${Number(v).toFixed(2)} credits` : `${fullNumber(Number(v))} tokens`)
         }
       }
     ]
@@ -81,7 +87,7 @@ function AccountRow({ view, onLogout }: { view: AccountQuotaView; onLogout: () =
   const hasOfficialUsage = view.extra?.usage30Tokens != null
 
   useEffect(() => {
-    if (!hasOfficialUsage) return
+    // 所有账号都尝试拉逐日账单（DeepSeek=tokens/花费，CodeBuddy/WorkBuddy=credits）
     let alive = true
     void nexus.getAccountUsage(view.platform, view.accountId, 30).then((rows) => {
       if (alive) setUsage(rows)
@@ -90,6 +96,10 @@ function AccountRow({ view, onLogout }: { view: AccountQuotaView; onLogout: () =
       alive = false
     }
   }, [hasOfficialUsage, view.platform, view.accountId])
+
+  const creditSum =
+    usage?.reduce((a, p) => a + (p.currency === 'CRED' ? p.costAmount : 0), 0) ?? 0
+  const creditRequests = usage?.reduce((a, p) => a + (p.currency === 'CRED' ? p.requests : 0), 0) ?? 0
 
   return (
     <div className="flex flex-col gap-2 rounded-lg px-2 py-2 transition-colors duration-150 hover:bg-surface">
@@ -155,6 +165,15 @@ function AccountRow({ view, onLogout }: { view: AccountQuotaView; onLogout: () =
       )}
       {view.extra?.usageText && (
         <div className="font-mono text-ui-xs text-foreground-subtlest">{view.extra.usageText}</div>
+      )}
+      {/* credits 口径（CodeBuddy/WorkBuddy 云端账单）：无官方 usage 块时单独给一行汇总 */}
+      {hasOfficialUsage !== true && creditRequests > 0 && (
+        <div className="flex items-baseline justify-between rounded-lg border border-hairline bg-surface px-3 py-1.5">
+          <span className="text-ui-xs text-foreground-subtle">近 30 天消耗（云端账单）</span>
+          <span className="font-mono text-ui-sm tabular-nums text-foreground">
+            {creditRequests} 次请求 · {creditSum.toFixed(2)} credits
+          </span>
+        </div>
       )}
       {usage != null && usage.length > 0 && <UsageMiniChart points={usage} />}
     </div>

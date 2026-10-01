@@ -10,10 +10,11 @@
 // 凭据：官方 IDE 登录态存云端/加密存储，本地无明文 token → 本地导入返回 []，走应用内 OAuth。
 
 import { shell } from 'electron'
-import type { DiscoveredCredential, OAuthSession, PlatformIntegration, PlatformQuota } from '../types'
+import type { AccountUsagePoint, DiscoveredCredential, OAuthSession, PlatformIntegration, PlatformQuota } from '../types'
 import { QuotaAuthError } from '../types'
 import type { QuotaWindow } from '@shared/quotas'
 import { fetchJson, parseTimeLoose, pickNumber, pickString } from '../http'
+import { fetchRequestUsageDaily } from './request-usage'
 
 const ENDPOINT = 'https://www.codebuddy.cn'
 const API_PREFIX = '/v2/plugin'
@@ -155,6 +156,11 @@ export const integration: PlatformIntegration = {
     }
     if (!windows.length) throw new Error('配额资源解析为空')
     return { windows }
+  },
+
+  /** 云端逐请求用量（31 天窗口，credit 口径）。 */
+  async fetchUsage(cred: DiscoveredCredential): Promise<AccountUsagePoint[]> {
+    return fetchRequestUsageDaily([ENDPOINT], cred.accessToken ?? '', cred.accountId)
   }
 }
 

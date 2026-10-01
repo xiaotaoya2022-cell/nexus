@@ -10,7 +10,9 @@
 import { randomBytes } from 'node:crypto'
 import { shell } from 'electron'
 import type { DiscoveredCredential, OAuthSession, PlatformIntegration, PlatformQuota } from '../types'
+import type { AccountUsagePoint } from '../types'
 import { QuotaAuthError } from '../types'
+import { fetchRequestUsageDaily } from './request-usage'
 import { fetchJson, pickString } from '../http'
 
 const ENDPOINT = 'https://copilot.tencent.com'
@@ -60,5 +62,14 @@ export const integration: PlatformIntegration = {
     }
     if (res.status !== 200) throw new Error(`user/info 返回 ${res.status}`)
     throw new QuotaAuthError('WorkBuddy 配额窗口字段待端点定位（token 已有效）')
+  },
+
+  /** 云端逐请求用量（31 天窗口，credit 口径）。令牌域需一致，按序尝试多个域名。 */
+  async fetchUsage(cred: DiscoveredCredential): Promise<AccountUsagePoint[]> {
+    return fetchRequestUsageDaily(
+      ['https://www.workbuddy.cn', ENDPOINT, 'https://www.codebuddy.cn'],
+      cred.accessToken ?? '',
+      cred.accountId
+    )
   }
 }

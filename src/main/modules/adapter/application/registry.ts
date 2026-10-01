@@ -15,6 +15,7 @@ import { CodeBuddyAdapter } from '../infrastructure/codebuddy'
 import { DshAdapter } from '../infrastructure/dsh'
 import { ReasonixAdapter } from '../infrastructure/reasonix'
 import { OpencodeAdapter } from '../infrastructure/opencode'
+import { WorkBuddyAdapter } from '../infrastructure/workbuddy'
 
 export function createAdapters(store: StoreWriter): AgentAdapter[] {
   return [
@@ -25,17 +26,13 @@ export function createAdapters(store: StoreWriter): AgentAdapter[] {
     new CodeBuddyAdapter(store),
     new DshAdapter(store),
     new ReasonixAdapter(store),
-    new OpencodeAdapter(store)
+    new OpencodeAdapter(store),
+    new WorkBuddyAdapter(store)
   ]
 }
 
 export const PRESENCE_ONLY_AGENTS: PresenceOnlyAgent[] = [
-  {
-    id: 'workbuddy',
-    label: 'WorkBuddy',
-    detectPaths: [join(homedir(), '.workbuddy')],
-    note: '状态云同步，无本地用量数据'
-  },
+  // workbuddy 已升级为真实适配器（~/.workbuddy-ai 转录/traces/workbuddy.db），不再 presence-only
   {
     id: 'qoder',
     label: 'Qoder',
