@@ -13,6 +13,8 @@ import { AntigravityAdapter } from '../infrastructure/antigravity'
 import { ClaudeCodeAdapter } from '../infrastructure/claude-code'
 import { CodeBuddyAdapter } from '../infrastructure/codebuddy'
 import { DshAdapter } from '../infrastructure/dsh'
+import { ReasonixAdapter } from '../infrastructure/reasonix'
+import { OpencodeAdapter } from '../infrastructure/opencode'
 
 export function createAdapters(store: StoreWriter): AgentAdapter[] {
   return [
@@ -21,7 +23,9 @@ export function createAdapters(store: StoreWriter): AgentAdapter[] {
     new AntigravityAdapter(store),
     new ClaudeCodeAdapter(store),
     new CodeBuddyAdapter(store),
-    new DshAdapter(store)
+    new DshAdapter(store),
+    new ReasonixAdapter(store),
+    new OpencodeAdapter(store)
   ]
 }
 
@@ -41,15 +45,7 @@ export const PRESENCE_ONLY_AGENTS: PresenceOnlyAgent[] = [
     ],
     note: '会话历史存云端'
   },
-  {
-    id: 'reasonix',
-    label: 'Reasonix',
-    detectPaths: [
-      join(homedir(), '.reasonix'),
-      join(process.env.APPDATA ?? '', 'reasonix')
-    ],
-    note: '本地仅对话快照，无 token 记录'
-  },
+  // reasonix 已升级为真实适配器（stats/每日.jsonl 请求级用量），不再 presence-only
   {
     id: 'trae',
     label: 'Trae',
