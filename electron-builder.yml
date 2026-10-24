@@ -3,6 +3,8 @@ productName: Nexus
 directories:
   output: release
   buildResources: build
+# 用 node_modules 里已解压的 Electron（开发依赖同版本），打包零下载（公司网络/代理波动时不再卡 TLS）
+electronDist: node_modules/electron/dist
 files:
   - out/**
   - package.json

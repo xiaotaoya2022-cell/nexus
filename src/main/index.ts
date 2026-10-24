@@ -45,12 +45,15 @@ function createWindow(): void {
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#161616' : '#f8f8f8',
     autoHideMenuBar: true,
     show: false,
-    // 无系统标题栏，自绘顶栏（ZCode 同款形态）；Windows 用 WCO 补回窗口控制钮
+    // 无系统标题栏，自绘顶栏（ZCode 同款形态）；Windows 用 WCO 补回窗口控制钮。
+    // WCO 底色必须跟随主题（用户反馈：切主题后右上角控制钮区域颜色突兀）
     titleBarStyle: 'hidden',
     titleBarOverlay: {
       symbolColor: nativeTheme.shouldUseDarkColors ? '#d4d4d4' : '#262626',
+      backgroundColor: nativeTheme.shouldUseDarkColors ? '#202020' : '#ffffff',
       height: 48
-    },
+      // Electron 41 的 TS 类型未收录 backgroundColor，但 Windows 运行时支持
+    } as unknown as Electron.TitleBarOverlay,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -158,6 +161,22 @@ app.whenReady()
 
   const theme = store.getSetting('theme')
   nativeTheme.themeSource = theme === 'light' ? 'light' : 'dark'
+
+  // WCO 窗口控制钮区域颜色跟随主题（含启动与运行中切换；updated 在 themeSource 变化时触发）
+  const syncOverlayTheme = (): void => {
+    const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : BrowserWindow.getAllWindows()[0]
+    if (!win) return
+    try {
+      win.setTitleBarOverlay({
+        symbolColor: nativeTheme.shouldUseDarkColors ? '#d4d4d4' : '#262626',
+        backgroundColor: nativeTheme.shouldUseDarkColors ? '#202020' : '#ffffff'
+      } as unknown as Parameters<BrowserWindow['setTitleBarOverlay']>[0])
+    } catch {
+      // 非 Windows / 无 WCO 时不可用，忽略
+    }
+  }
+  nativeTheme.on('updated', syncOverlayTheme)
+  syncOverlayTheme()
 
   const adapters = createAdapters(store)
   const query = new QueryService(store)

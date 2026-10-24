@@ -289,6 +289,34 @@ export function createDeepSeekIntegration(cfg: DeepSeekConfig): PlatformIntegrat
       win.show()
       win.focus()
       await win.loadURL(`${endpoint}/sign_in`)
+      // 自动切换到邮箱密码登录通道：sign_in 页默认落在 +86 验证码/微信扫码（国内通道），
+      // 国际账号只能走 "Login with password"（国际区仅邮箱注册，平台按 IP/区域决定可选通道）。
+      // 这里等价于替用户点一次该链接；手机/微信通道仍可手动切回。找不到链接不报错
+      // （可能已在密码表单或 DOM 变化）。注意：同文本的隐藏测量 span（ds-sign-in-form__social-link-measure）
+      // 必须跳过，点它无效——只点可见元素或其 button/a 祖先。
+      if (!win.isDestroyed()) {
+        const switchDeadline = Date.now() + 15_000
+        while (Date.now() < switchDeadline && !win.isDestroyed()) {
+          try {
+            const clicked = (await win.webContents.executeJavaScript(
+              `(() => {
+                 const match = [...document.querySelectorAll('a, button, span, div')]
+                   .filter(e => /^(login with password|密码登录)$/i.test((e.textContent || '').trim()))
+                 const visible = match.filter(e => e.offsetParent !== null).pop() || match[match.length - 1]
+                 if (!visible) return false
+                 const target = visible.closest('button, a') || visible
+                 target.click()
+                 return true
+               })()`,
+              false
+            )) as boolean
+            if (clicked === true) break
+          } catch {
+            // 页面尚未就绪，继续等
+          }
+          await new Promise((res) => setTimeout(res, 1000))
+        }
+      }
       const deadline = Date.now() + LOGIN_TIMEOUT_MS
       while (Date.now() < deadline) {
         if (win.isDestroyed()) break
