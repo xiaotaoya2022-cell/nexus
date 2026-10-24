@@ -55,6 +55,16 @@ export class QuotaEngine {
 
   registerIntegrations(list: PlatformIntegration[]): void {
     this.integrations = list
+    // 清理已下线/改 id 平台的陈旧缓存视图（如 deepseek → deepseek-cn 拆分后的旧键）
+    const known = new Set(list.map((p) => p.id))
+    let pruned = false
+    for (const key of Object.keys(this.views)) {
+      if (!known.has(key)) {
+        delete this.views[key]
+        pruned = true
+      }
+    }
+    if (pruned) this.saveCache()
   }
 
   // ── 持久化 ──
@@ -66,7 +76,18 @@ export class QuotaEngine {
     try {
       if (!existsSync(this.authPath())) return { version: 1, sessions: {} }
       const parsed = JSON.parse(readFileSync(this.authPath(), 'utf8')) as StoredAuth
-      return parsed.version === 1 && parsed.sessions ? parsed : { version: 1, sessions: {} }
+      const auth: StoredAuth =
+        parsed.version === 1 && parsed.sessions ? parsed : { version: 1, sessions: {} }
+      // 一次性迁移：deepseek → deepseek-cn（v0.2.7 平台拆分，保留既有登录态不强制重登）
+      if (auth.sessions['deepseek']?.length) {
+        auth.sessions['deepseek-cn'] = [
+          ...(auth.sessions['deepseek-cn'] ?? []),
+          ...auth.sessions['deepseek']
+        ]
+        delete auth.sessions['deepseek']
+        this.saveAuth(auth)
+      }
+      return auth
     } catch {
       return { version: 1, sessions: {} }
     }
