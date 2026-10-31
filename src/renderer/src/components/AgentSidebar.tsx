@@ -9,6 +9,7 @@ import { vendorOf, type VendorMeta } from '@shared/vendors'
 import { relativeTime } from '@renderer/lib/format'
 import { AnimatedNumber } from './RollingNumber'
 import { VendorBadge } from './VendorBadge'
+import { AgentLogo } from './AgentLogo'
 import { STATUS_TEXT, StatusDot } from './ui'
 import { useUi } from '@renderer/store'
 
@@ -89,7 +90,7 @@ export function AgentSidebar({
       } ${agent === a.id ? 'bg-selected' : 'hover:bg-surface-hover'}`}
     >
       <StatusDot status={a.status} />
-      <VendorBadge vendor={vendorOf(a.id)} />
+      <AgentLogo agentId={a.id} vendor={vendorOf(a.id)} />
       <span className="min-w-0 flex-1 text-left">
         <span className="block truncate text-ui-base text-foreground">{a.label}</span>
         <span className="block truncate font-mono text-ui-xs text-foreground-subtlest">
