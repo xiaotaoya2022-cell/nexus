@@ -210,6 +210,9 @@ app.whenReady()
       logger.warn('quota.usage_sink_failed', { platform, error: err instanceof Error ? err.message : String(err) })
     }
   })
+  quota.setEarliestDayQuery(
+    (platform, accountId) => store?.earliestAccountUsageDay(platform, accountId) ?? null
+  )
   let remoteSecret = store.getSetting('remoteSecret')
   if (!remoteSecret) {
     remoteSecret = randomBytes(32).toString('hex')

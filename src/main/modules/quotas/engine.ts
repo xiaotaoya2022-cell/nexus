@@ -38,6 +38,8 @@ export class QuotaEngine {
   /** 告警去重：account:window → 上次告警时间（6h 内不重复） */
   private lastAlertAt = new Map<string, number>()
   private onUsage?: UsageSink
+  /** 查询某平台账号已采集的最早账单日（YYYY-MM-DD），用于 fetchUsage 增量起点 */
+  private earliestDayQuery?: (platform: string, accountId: string) => string | null
 
   constructor(
     private readonly userDataDir: string,
@@ -51,6 +53,11 @@ export class QuotaEngine {
   /** 注入账号用量落库通道（main 侧接 NexusStore.upsertAccountUsage）。 */
   setUsageSink(sink: UsageSink): void {
     this.onUsage = sink
+  }
+
+  /** 注入已采集最早日查询（main 侧接 NexusStore.earliestAccountUsageDay）。 */
+  setEarliestDayQuery(q: (platform: string, accountId: string) => string | null): void {
+    this.earliestDayQuery = q
   }
 
   registerIntegrations(list: PlatformIntegration[]): void {
@@ -235,10 +242,12 @@ export class QuotaEngine {
         const quota = await this.fetchWithRefresh(integration, cred, platformId)
         views.push({ ...base, planLabel: quota.planLabel, windows: quota.windows, extra: quota.extra })
         this.checkAlerts(base, quota.windows)
-        // 账号级每日真实消耗（如 DeepSeek 官方账单）→ 落库
+        // 账号级每日真实消耗（如 DeepSeek 官方账单）→ 落库。
+        // sinceDay=库内已采集最早日：全量回溯只在首采时发生，之后每轮覆盖最早日至今。
         if (typeof integration.fetchUsage === 'function') {
           try {
-            const rows = await integration.fetchUsage(cred)
+            const earliest = this.earliestDayQuery?.(platformId, base.accountId) ?? undefined
+            const rows = await integration.fetchUsage(cred, earliest)
             if (rows.length > 0) this.onUsage?.(platformId, base.accountId, rows)
           } catch (usageErr) {
             logger.warn('quota.usage_failed', {

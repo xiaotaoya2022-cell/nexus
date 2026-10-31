@@ -285,6 +285,14 @@ export class NexusStore implements StoreWriter {
     }))
   }
 
+  /** 某平台账号已采集的最早账单日（YYYY-MM-DD）；无数据返回 null（fetchUsage 全量回溯起点）。 */
+  earliestAccountUsageDay(platform: string, accountId: string): string | null {
+    const row = this.db
+      .prepare('SELECT MIN(day) d FROM account_usage_daily WHERE platform = ? AND account_id = ?')
+      .get(platform, accountId) as { d: string | null } | undefined
+    return row?.d ?? null
+  }
+
   // ── sync_state ──
   loadSyncState(agent: string): { lastTs: number; meta: Record<string, unknown> } {
     const row = this.db

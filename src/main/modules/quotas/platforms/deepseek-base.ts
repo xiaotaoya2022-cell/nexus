@@ -25,7 +25,8 @@ import { BrowserWindow } from 'electron'
 import type { AccountUsagePoint, DiscoveredCredential, LoginMode, OAuthSession, PlatformIntegration, PlatformQuota } from '../types'
 import { QuotaAuthError } from '../types'
 import type { QuotaWindow } from '@shared/quotas'
-import { fetchJson, pickNumber } from '../http'
+import { pickNumber } from '../http'
+import { logger } from '@main/modules/shared/logger'
 
 const LOGIN_TIMEOUT_MS = 5 * 60_000
 const LOGIN_POLL_MS = 1500
@@ -120,6 +121,36 @@ interface UsageSeries {
 
 const f2 = (n: number): string => n.toFixed(2)
 
+/** 全量回溯天数上限：usage API 按账号创建日期返回，创建前的段为空（滚动会在连续 2 个
+ *  空段后停止，因此这里只需 ≥ 账号年龄；400 天覆盖一般个人账号全生命周期）。 */
+const USAGE_LOOKBACK_DAYS = 400
+
+/** DeepSeek API 专用直连 fetch：node 全局 fetch 不走系统代理。
+ *  实测（2026-10-31）：net.fetch 走用户梯子（系统代理）时对 platform.deepseek.com
+ *  CONNECT 成功但 TLS 后断流，每请求挂到 20s 超时，导致全量回溯 40 个请求卡死 20+ 分钟；
+ *  而直连 373ms 即通（DeepSeek 为国内可达站点）。返回形状与 http.fetchJson 一致。 */
+async function dsFetchJson(
+  url: string,
+  init: { headers?: Record<string, string>; timeoutMs?: number } = {}
+): Promise<{ status: number; body: unknown; text: string }> {
+  const { timeoutMs = 20_000, headers } = init
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const res = await fetch(url, { headers, signal: controller.signal })
+    const text = await res.text()
+    let body: unknown = text
+    try {
+      body = JSON.parse(text)
+    } catch {
+      // 非 JSON 响应保留文本
+    }
+    return { status: res.status, body, text }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 /** 隐藏窗口在指定持久分区上静默重取 SPA 登录产物（userToken + 用户 id）。 */
 async function readUserTokenFromPartition(
   partition: string,
@@ -171,22 +202,22 @@ export function createDeepSeekIntegration(cfg: DeepSeekConfig): PlatformIntegrat
   const { id, label, endpoint, partition, displayName, intl } = cfg
   const assertPlatformUrl = makeAssertPlatformUrl(endpoint)
 
-  /** 拉窗口内 usage（amount+cost 两个端点），返回聚合与逐日序列。 */
-  async function fetchUsageWindow(
+  /** 拉一个窗口（跨度 ≤31 天）的 usage（amount+cost 两个端点），返回按日 Map。
+   *  API 硬限制：单请求 end-start ≤ 31 天（实测 32 天起 biz_code=1 INVALID_PARAM），
+   *  但窗口可滑动回溯到账号创建（2026-10-31 实测 90 天前的段正常返回）。 */
+  async function fetchUsageWindowMaps(
     token: string,
     startSec: number,
     endSec: number
   ): Promise<{
-    points: AccountUsagePoint[]
-    totalTokens: number
-    totalRequests: number
-    totalCost: { usd: number; cny: number }
+    tokensByDay: Map<number, { tokens: number; requests: number }>
+    costByDay: Map<number, { usd: number; cny: number }>
   }> {
     assertPlatformUrl(`${endpoint}/api/v0/usage/by_api_key/amount`)
     const H = { accept: 'application/json', authorization: `Bearer ${token}` }
     const q = `start=${startSec}&end=${endSec}&tz=${tzOffsetSec()}`
-    const amountRes = await fetchJson(`${endpoint}/api/v0/usage/by_api_key/amount?${q}`, { headers: H })
-    const costRes = await fetchJson(`${endpoint}/api/v0/usage/by_api_key/cost?${q}`, { headers: H })
+    const amountRes = await dsFetchJson(`${endpoint}/api/v0/usage/by_api_key/amount?${q}`, { headers: H })
+    const costRes = await dsFetchJson(`${endpoint}/api/v0/usage/by_api_key/cost?${q}`, { headers: H })
     const amount = bizData(amountRes.body)
     const cost = bizData(costRes.body)
 
@@ -222,6 +253,46 @@ export function createDeepSeekIntegration(cfg: DeepSeekConfig): PlatformIntegrat
         }
       }
     }
+    return { tokensByDay, costByDay }
+  }
+
+  /** 全量回溯：从今天往回按 31 天跨度滚动分段拉取，直到 sinceSec 或连续 2 个空段
+   *  （空段=账号创建之前，不会再有更早数据）。合并为逐日序列。 */
+  async function fetchUsageAll(
+    token: string,
+    sinceSec: number
+  ): Promise<{ points: AccountUsagePoint[]; totalTokens: number; totalRequests: number; totalCost: { usd: number; cny: number } }> {
+    const tokensByDay = new Map<number, { tokens: number; requests: number }>()
+    const costByDay = new Map<number, { usd: number; cny: number }>()
+    const span = 31 * 86400
+    let endSec = dayStartSec(0) + 86400 // 明天零点（与官方页面"到今天"口径一致）
+    let emptyStreak = 0
+    for (let seg = 0; seg < 20 && endSec > sinceSec && emptyStreak < 2; seg++) {
+      const startSec = Math.max(sinceSec, endSec - span)
+      let maps: Awaited<ReturnType<typeof fetchUsageWindowMaps>>
+      try {
+        maps = await fetchUsageWindowMaps(token, startSec, endSec)
+      } catch (err) {
+        // 单段失败不放弃全量（网络抖动），直接结束回滚保护已取数据
+        if (seg === 0) throw err
+        break
+      }
+      for (const [t, v] of maps.tokensByDay) {
+        const cur = tokensByDay.get(t) ?? { tokens: 0, requests: 0 }
+        cur.tokens += v.tokens
+        cur.requests += v.requests
+        tokensByDay.set(t, cur)
+      }
+      for (const [t, v] of maps.costByDay) {
+        const cur = costByDay.get(t) ?? { usd: 0, cny: 0 }
+        cur.usd += v.usd
+        cur.cny += v.cny
+        costByDay.set(t, cur)
+      }
+      if (maps.tokensByDay.size === 0 && maps.costByDay.size === 0) emptyStreak++
+      else emptyStreak = 0
+      endSec = startSec
+    }
 
     const days = new Set<number>([...tokensByDay.keys(), ...costByDay.keys()])
     const points: AccountUsagePoint[] = []
@@ -229,7 +300,7 @@ export function createDeepSeekIntegration(cfg: DeepSeekConfig): PlatformIntegrat
     let totalRequests = 0
     let usd = 0
     let cny = 0
-    for (const t of days) {
+    for (const t of [...days].sort((a, b) => a - b)) {
       const tk = tokensByDay.get(t) ?? { tokens: 0, requests: 0 }
       const cst = costByDay.get(t) ?? { usd: 0, cny: 0 }
       const day = new Date(t * 1000)
@@ -349,20 +420,23 @@ export function createDeepSeekIntegration(cfg: DeepSeekConfig): PlatformIntegrat
       throw new Error('登录未完成：窗口已关闭或超过 5 分钟')
     },
 
-    /** 余额 + 累计消费 + 近 30 天用量（extra 文案）；fetchUsage 负责逐日落库。 */
+    /** 余额 + 官方累计消费 + 全历史用量合计（extra 文案）；fetchUsage 负责逐日落库。 */
     async fetchQuota(cred: DiscoveredCredential): Promise<PlatformQuota> {
       const token = cred.accessToken ?? ''
       assertPlatformUrl(`${endpoint}/api/v0/users/get_user_summary`)
       const H = { accept: 'application/json', authorization: `Bearer ${token}` }
-      const summary = bizData((await fetchJson(`${endpoint}/api/v0/users/get_user_summary`, { headers: H })).body)
+      const summary = bizData((await dsFetchJson(`${endpoint}/api/v0/users/get_user_summary`, { headers: H })).body)
 
       const costs = costsByCurrency(summary.total_costs)
 
-      let usage30: Awaited<ReturnType<typeof fetchUsageWindow>> | null = null
+      let usageAll: Awaited<ReturnType<typeof fetchUsageAll>> | null = null
       try {
-        usage30 = await fetchUsageWindow(token, dayStartSec(30), dayStartSec(0) + 86400)
-      } catch {
+        usageAll = await fetchUsageAll(token, dayStartSec(USAGE_LOOKBACK_DAYS))
+      } catch (err) {
         // 用量窗口失败不影响余额/累计消费展示
+        logger.warn('quota.deepseek_usage_all_failed', {
+          error: err instanceof Error ? err.message : String(err)
+        })
       }
 
       const windows: QuotaWindow[] = [
@@ -378,20 +452,23 @@ export function createDeepSeekIntegration(cfg: DeepSeekConfig): PlatformIntegrat
         usdBalanceText: `$${f2(walletSum(summary.normal_wallets, 'USD') + walletSum(summary.bonus_wallets, 'USD'))}`,
         totalCostText: costs.usd > 0 ? `$${f2(costs.usd)} + ¥${f2(costs.cny)}` : `¥${f2(costs.cny)}`
       }
-      if (usage30) {
-        extra.usage30Tokens = String(usage30.totalTokens)
-        extra.usage30Requests = String(usage30.totalRequests)
-        extra.usage30CostText =
-          usage30.totalCost.usd > 0
-            ? `$${f2(usage30.totalCost.usd)} + ¥${f2(usage30.totalCost.cny)}`
-            : `¥${f2(usage30.totalCost.cny)}`
+      if (usageAll) {
+        extra.usageTotalTokens = String(usageAll.totalTokens)
+        extra.usageTotalRequests = String(usageAll.totalRequests)
+        extra.usageTotalCostText =
+          usageAll.totalCost.usd > 0
+            ? `$${f2(usageAll.totalCost.usd)} + ¥${f2(usageAll.totalCost.cny)}`
+            : `¥${f2(usageAll.totalCost.cny)}`
       }
       return { planLabel: '按量付费', windows, extra }
     },
 
-    /** 逐日真实消耗（近 30 天），引擎落库供账号面板画趋势。 */
-    async fetchUsage(cred: DiscoveredCredential): Promise<AccountUsagePoint[]> {
-      const r = await fetchUsageWindow(cred.accessToken ?? '', dayStartSec(30), dayStartSec(0) + 86400)
+    /** 逐日真实消耗（全历史回溯，引擎落库供账号面板画趋势）。
+     *  注意：恒定从 USAGE_LOOKBACK_DAYS 前全量回溯（空段×2 自动停在账号创建前），**不用**
+     *  sinceDay 截断起点——若从已采集最早日截断，历史缺口（如安装升级前的月份）将永远无法回补。
+     *  全量成本低（约 4-6 段 × 2 请求，直连几百 ms/段），upsert 幂等。 */
+    async fetchUsage(cred: DiscoveredCredential, _sinceDay?: string): Promise<AccountUsagePoint[]> {
+      const r = await fetchUsageAll(cred.accessToken ?? '', dayStartSec(USAGE_LOOKBACK_DAYS))
       return r.points
     },
 

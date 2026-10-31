@@ -84,12 +84,12 @@ function UsageMiniChart({ points }: { points: AccountUsagePoint[] }): JSX.Elemen
 
 function AccountRow({ view, onLogout }: { view: AccountQuotaView; onLogout: () => void }): JSX.Element {
   const [usage, setUsage] = useState<AccountUsagePoint[] | null>(null)
-  const hasOfficialUsage = view.extra?.usage30Tokens != null
+  const hasOfficialUsage = view.extra?.usageTotalTokens != null
 
   useEffect(() => {
     // 所有账号都尝试拉逐日账单（DeepSeek=tokens/花费，CodeBuddy/WorkBuddy=credits）
     let alive = true
-    void nexus.getAccountUsage(view.platform, view.accountId, 30).then((rows) => {
+    void nexus.getAccountUsage(view.platform, view.accountId, 365).then((rows) => {
       if (alive) setUsage(rows)
     })
     return () => {
@@ -124,7 +124,7 @@ function AccountRow({ view, onLogout }: { view: AccountQuotaView; onLogout: () =
         )}
       </div>
 
-      {/* 官方账单口径（DeepSeek 开放平台）：余额/累计消费/近30天 */}
+      {/* 官方账单口径（DeepSeek 开放平台）：余额/累计消费/全历史累计用量 */}
       {view.extra?.totalCostText != null && (
         <div className="grid grid-cols-3 gap-2 rounded-lg border border-hairline bg-surface px-3 py-2">
           <div className="flex flex-col gap-0.5">
@@ -139,9 +139,9 @@ function AccountRow({ view, onLogout }: { view: AccountQuotaView; onLogout: () =
             </span>
           </div>
           <div className="flex flex-col gap-0.5">
-            <span className="text-ui-xs text-foreground-subtle">近 30 天</span>
-            <span className="font-mono text-ui-base tabular-nums text-foreground" title={`${view.extra.usage30Requests ?? 0} 次请求`}>
-              {compactNumber(Number(view.extra.usage30Tokens ?? 0))} tk · {view.extra.usage30CostText ?? '—'}
+            <span className="text-ui-xs text-foreground-subtle">用量合计（全历史）</span>
+            <span className="font-mono text-ui-base tabular-nums text-foreground" title={`${view.extra.usageTotalRequests ?? 0} 次请求`}>
+              {compactNumber(Number(view.extra.usageTotalTokens ?? 0))} tk · {view.extra.usageTotalCostText ?? '—'}
             </span>
           </div>
         </div>
@@ -169,7 +169,7 @@ function AccountRow({ view, onLogout }: { view: AccountQuotaView; onLogout: () =
       {/* credits 口径（CodeBuddy/WorkBuddy 云端账单）：无官方 usage 块时单独给一行汇总 */}
       {hasOfficialUsage !== true && creditRequests > 0 && (
         <div className="flex items-baseline justify-between rounded-lg border border-hairline bg-surface px-3 py-1.5">
-          <span className="text-ui-xs text-foreground-subtle">近 30 天消耗（云端账单）</span>
+          <span className="text-ui-xs text-foreground-subtle">近 30 天消耗（云端账单，仅存 31 天）</span>
           <span className="font-mono text-ui-sm tabular-nums text-foreground">
             {creditRequests} 次请求 · {creditSum.toFixed(2)} credits
           </span>
@@ -289,7 +289,7 @@ export function AccountPanel(): JSX.Element {
               </div>
             )}
             <div className="mt-2 text-ui-xs text-foreground-subtlest">
-              DeepSeek 为官方账单口径（累计消费/余额/逐日用量，每 5 分钟刷新）；其余平台为配额窗口。凭据仅在内存使用，不写入 Nexus 数据库。
+              DeepSeek 为官方账单口径（累计消费/余额/全历史逐日用量，每 5 分钟增量刷新）；CodeBuddy/WorkBuddy 云端账单仅存近 31 天，更早用量以本地解析为准。凭据仅在内存使用，不写入 Nexus 数据库。
             </div>
           </div>
         </>

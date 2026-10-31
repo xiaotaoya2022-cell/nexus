@@ -53,9 +53,10 @@ export interface PlatformIntegration {
   fetchQuota(cred: DiscoveredCredential): Promise<PlatformQuota>
   /**
    * 可选：拉账号级每日真实消耗（官方账单口径，如 DeepSeek usage API）。
+   * sinceDay=已采集最早日（YYYY-MM-DD，引擎从库内 MIN(day) 传入；缺省拉平台允许的全量回溯）。
    * 引擎把结果交给 onUsage 落库，供账号面板绘制趋势。
    */
-  fetchUsage?(cred: DiscoveredCredential): Promise<AccountUsagePoint[]>
+  fetchUsage?(cred: DiscoveredCredential, sinceDay?: string): Promise<AccountUsagePoint[]>
   /** 刷新 oauth 凭据（若平台有 refresh 端点）；不支持则原样返回 */
   refreshCredential?(cred: DiscoveredCredential): Promise<DiscoveredCredential>
 }
