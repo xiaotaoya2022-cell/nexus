@@ -16,6 +16,8 @@ export interface UsageRecordInput {
   sessionId?: string | null
   dedupeKey: string
   isEstimated?: boolean
+  /** 该行代表的请求数（官方账单合成行 >1；适配器逐请求行缺省 1） */
+  requests?: number
 }
 
 export interface SessionRecordInput {

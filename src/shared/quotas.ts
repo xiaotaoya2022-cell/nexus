@@ -33,6 +33,8 @@ export interface AccountUsagePoint {
   tokens: number // 全部 token 类型合计（响应+缓存命中+未命中）
   costAmount: number // 花费数额（配 currency）
   currency: string // 'CNY' | 'USD'
+  /** 当日按模型细分（官方账单含模型维度时提供）；合成 usage_records 用 */
+  models?: Record<string, { input: number; output: number; cacheRead: number; requests: number }>
 }
 
 export interface PlatformMetaView {

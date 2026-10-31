@@ -48,7 +48,7 @@ function buildAgentInfos(deps: IpcDeps): AgentInfo[] {
     const rows = deps.store.db
       .prepare(
         `SELECT agent, SUM(input_tokens+output_tokens+reasoning_tokens+cache_read_tokens+cache_write_tokens) t,
-                COUNT(*) n FROM usage_records WHERE ts >= ? GROUP BY agent`
+                COALESCE(SUM(requests), COUNT(*)) n FROM usage_records WHERE ts >= ? GROUP BY agent`
       )
       .all(todayStart) as Array<Record<string, unknown>>
     for (const r of rows) {

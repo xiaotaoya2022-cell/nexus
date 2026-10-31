@@ -19,7 +19,7 @@ import { TOTAL_EXPR } from '../infrastructure/store'
 import { estimateCostUsd } from './pricing'
 
 const SUMS = `SUM(input_tokens) i, SUM(output_tokens) o, SUM(reasoning_tokens) r,
-  SUM(cache_read_tokens) cr, SUM(cache_write_tokens) cw, COUNT(*) n`
+  SUM(cache_read_tokens) cr, SUM(cache_write_tokens) cw, COALESCE(SUM(requests), COUNT(*)) n`
 
 export function rangeStartMs(range: RangeKey, now = Date.now()): number {
   if (range === 'all') return 0
@@ -326,7 +326,7 @@ export class QueryService {
                 ifnull(u.tokens, 0) tokens, ifnull(u.requests, 0) requests
          FROM sessions s
          LEFT JOIN (
-           SELECT agent, session_id, SUM(${TOTAL_EXPR}) tokens, COUNT(*) requests
+           SELECT agent, session_id, SUM(${TOTAL_EXPR}) tokens, COALESCE(SUM(requests), COUNT(*)) requests
            FROM usage_records
            WHERE ts >= ? AND session_id IS NOT NULL
            GROUP BY agent, session_id

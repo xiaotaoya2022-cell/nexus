@@ -32,7 +32,8 @@ const SCHEMA_STATEMENTS: string[] = [
     cache_write_tokens INTEGER NOT NULL DEFAULT 0,
     session_id TEXT,
     dedupe_key TEXT NOT NULL UNIQUE,
-    is_estimated INTEGER NOT NULL DEFAULT 0
+    is_estimated INTEGER NOT NULL DEFAULT 0,
+    requests INTEGER NOT NULL DEFAULT 1
   )`,
   'CREATE INDEX IF NOT EXISTS idx_usage_ts ON usage_records(ts)',
   'CREATE INDEX IF NOT EXISTS idx_usage_agent_ts ON usage_records(agent, ts)',
@@ -95,6 +96,12 @@ export class NexusStore implements StoreWriter {
     this.db = new DatabaseSync(dbPath)
     this.db.prepare('PRAGMA journal_mode = WAL').get()
     for (const stmt of SCHEMA_STATEMENTS) this.db.prepare(stmt).run()
+    try {
+      // 增量迁移（已存在时抛错忽略）：usage_records.requests——官方账单合成行每行代表 N 次请求
+      this.db.prepare('ALTER TABLE usage_records ADD COLUMN requests INTEGER NOT NULL DEFAULT 1').run()
+    } catch {
+      // 列已存在
+    }
     this.prepareStatements()
   }
 
@@ -107,8 +114,8 @@ export class NexusStore implements StoreWriter {
     this.stmtUsage = this.db.prepare(`
       INSERT INTO usage_records
         (agent, model, provider, ts, input_tokens, output_tokens, reasoning_tokens,
-         cache_read_tokens, cache_write_tokens, session_id, dedupe_key, is_estimated)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         cache_read_tokens, cache_write_tokens, session_id, dedupe_key, is_estimated, requests)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(dedupe_key) DO UPDATE SET
         ts = excluded.ts,
         model = excluded.model,
@@ -165,7 +172,8 @@ export class NexusStore implements StoreWriter {
           r.cacheWriteTokens,
           r.sessionId ?? null,
           r.dedupeKey,
-          r.isEstimated ? 1 : 0
+          r.isEstimated ? 1 : 0,
+          r.requests ?? 1
         )
         inserted += Number(res.changes)
       }

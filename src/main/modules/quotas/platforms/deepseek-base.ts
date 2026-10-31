@@ -212,6 +212,7 @@ export function createDeepSeekIntegration(cfg: DeepSeekConfig): PlatformIntegrat
   ): Promise<{
     tokensByDay: Map<number, { tokens: number; requests: number }>
     costByDay: Map<number, { usd: number; cny: number }>
+    perModelByDay: Map<number, Map<string, { input: number; output: number; cacheRead: number; requests: number }>>
   }> {
     assertPlatformUrl(`${endpoint}/api/v0/usage/by_api_key/amount`)
     const H = { accept: 'application/json', authorization: `Bearer ${token}` }
@@ -221,21 +222,32 @@ export function createDeepSeekIntegration(cfg: DeepSeekConfig): PlatformIntegrat
     const amount = bizData(amountRes.body)
     const cost = bizData(costRes.body)
 
-    // tokens/requests：按日合并全部 api_key×model 序列
+    // tokens/requests：按日合并全部 api_key×model 序列；并保留 按模型细分
+    // （官方口径：RESPONSE_TOKEN=输出，PROMPT_CACHE_HIT/MISS_TOKEN=输入及缓存读）
     const tokensByDay = new Map<number, { tokens: number; requests: number }>()
+    const perModelByDay = new Map<number, Map<string, { input: number; output: number; cacheRead: number; requests: number }>>()
     for (const s of (Array.isArray(amount.series) ? amount.series : []) as UsageSeries[]) {
+      const model = typeof s.model === 'string' && s.model ? s.model : 'unknown'
       for (const b of s.buckets ?? []) {
         if (typeof b.time !== 'number') continue
         const u = b.usage ?? {}
-        const tokens =
-          (pickNumber(u, ['RESPONSE_TOKEN']) ?? 0) +
-          (pickNumber(u, ['PROMPT_CACHE_HIT_TOKEN']) ?? 0) +
-          (pickNumber(u, ['PROMPT_CACHE_MISS_TOKEN']) ?? 0)
+        const response = pickNumber(u, ['RESPONSE_TOKEN']) ?? 0
+        const cacheHit = pickNumber(u, ['PROMPT_CACHE_HIT_TOKEN']) ?? 0
+        const cacheMiss = pickNumber(u, ['PROMPT_CACHE_MISS_TOKEN']) ?? 0
         const requests = pickNumber(u, ['REQUEST']) ?? 0
+        const tokens = response + cacheHit + cacheMiss
         const cur = tokensByDay.get(b.time) ?? { tokens: 0, requests: 0 }
         cur.tokens += tokens
         cur.requests += requests
         tokensByDay.set(b.time, cur)
+        let pm = perModelByDay.get(b.time)
+        if (!pm) { pm = new Map(); perModelByDay.set(b.time, pm) }
+        const mc = pm.get(model) ?? { input: 0, output: 0, cacheRead: 0, requests: 0 }
+        mc.input += cacheMiss // input=纯未命中；cacheRead 单列（总量公式 input+cacheRead+output 与官方 tokens 对齐，HIT 不双计）
+        mc.output += response
+        mc.cacheRead += cacheHit
+        mc.requests += requests
+        pm.set(model, mc)
       }
     }
     // 花费：按日合并（多币种分列；当前牌价只有 CNY/USD）
@@ -253,7 +265,7 @@ export function createDeepSeekIntegration(cfg: DeepSeekConfig): PlatformIntegrat
         }
       }
     }
-    return { tokensByDay, costByDay }
+    return { tokensByDay, costByDay, perModelByDay }
   }
 
   /** 全量回溯：从今天往回按 31 天跨度滚动分段拉取，直到 sinceSec 或连续 2 个空段
@@ -264,6 +276,7 @@ export function createDeepSeekIntegration(cfg: DeepSeekConfig): PlatformIntegrat
   ): Promise<{ points: AccountUsagePoint[]; totalTokens: number; totalRequests: number; totalCost: { usd: number; cny: number } }> {
     const tokensByDay = new Map<number, { tokens: number; requests: number }>()
     const costByDay = new Map<number, { usd: number; cny: number }>()
+    const perModelByDay = new Map<number, Map<string, { input: number; output: number; cacheRead: number; requests: number }>>()
     const span = 31 * 86400
     let endSec = dayStartSec(0) + 86400 // 明天零点（与官方页面"到今天"口径一致）
     let emptyStreak = 0
@@ -289,6 +302,18 @@ export function createDeepSeekIntegration(cfg: DeepSeekConfig): PlatformIntegrat
         cur.cny += v.cny
         costByDay.set(t, cur)
       }
+      for (const [t, pm] of maps.perModelByDay) {
+        const dst = perModelByDay.get(t) ?? new Map<string, { input: number; output: number; cacheRead: number; requests: number }>()
+        for (const [model, mc] of pm) {
+          const cur = dst.get(model) ?? { input: 0, output: 0, cacheRead: 0, requests: 0 }
+          cur.input += mc.input
+          cur.output += mc.output
+          cur.cacheRead += mc.cacheRead
+          cur.requests += mc.requests
+          dst.set(model, cur)
+        }
+        perModelByDay.set(t, dst)
+      }
       if (maps.tokensByDay.size === 0 && maps.costByDay.size === 0) emptyStreak++
       else emptyStreak = 0
       endSec = startSec
@@ -307,12 +332,17 @@ export function createDeepSeekIntegration(cfg: DeepSeekConfig): PlatformIntegrat
       const p = (n: number): string => String(n).padStart(2, '0')
       const dayStr = `${day.getFullYear()}-${p(day.getMonth() + 1)}-${p(day.getDate())}`
       const costAmount = cst.usd > 0 ? cst.usd : cst.cny
+      const pm = perModelByDay.get(t)
+      const models: AccountUsagePoint['models'] = pm
+        ? Object.fromEntries([...pm.entries()].map(([m, v]) => [m, v]))
+        : undefined
       points.push({
         day: dayStr,
         requests: tk.requests,
         tokens: tk.tokens,
         costAmount,
-        currency: cst.usd > 0 ? 'USD' : 'CNY'
+        currency: cst.usd > 0 ? 'USD' : 'CNY',
+        models
       })
       totalTokens += tk.tokens
       totalRequests += tk.requests

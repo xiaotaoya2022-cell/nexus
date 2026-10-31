@@ -209,6 +209,58 @@ app.whenReady()
     } catch (err) {
       logger.warn('quota.usage_sink_failed', { platform, error: err instanceof Error ? err.message : String(err) })
     }
+    // 官方账单合成 usage_records 行 → 进主看板"Token 消耗"总账。
+    // 防重：dedupeKey = bill:<账号ID>:<日>:<模型> —— 同账号退出重登（accountId 稳定）、
+    // 国内/国际双入口登录同一账号，都会命中同一条 dedupe_key，upsert 幂等不重复。
+    // credits 口径（tokens=0）不落 token 行，只在账号面板展示。
+    try {
+      const billRows: Parameters<NexusStore['insertUsage']>[0] = []
+      for (const row of rows) {
+        if (row.tokens <= 0) continue
+        const dayMs = Date.parse(`${row.day}T12:00:00+08:00`)
+        if (!Number.isFinite(dayMs)) continue
+        const models = row.models && Object.keys(row.models).length > 0 ? row.models : null
+        if (models) {
+          for (const [model, m] of Object.entries(models)) {
+            if (m.input + m.output <= 0) continue
+            billRows.push({
+              agent: platform,
+              model,
+              provider: 'official-bill',
+              ts: dayMs,
+              inputTokens: m.input,
+              outputTokens: m.output,
+              reasoningTokens: 0,
+              cacheReadTokens: m.cacheRead,
+              cacheWriteTokens: 0,
+              sessionId: null,
+              dedupeKey: `bill:${accountId}:${row.day}:${model}`,
+              isEstimated: false,
+              requests: m.requests
+            })
+          }
+        } else {
+          billRows.push({
+            agent: platform,
+            model: 'unknown',
+            provider: 'official-bill',
+            ts: dayMs,
+            inputTokens: row.tokens,
+            outputTokens: 0,
+            reasoningTokens: 0,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            sessionId: null,
+            dedupeKey: `bill:${accountId}:${row.day}`,
+            isEstimated: false,
+            requests: row.requests
+          })
+        }
+      }
+      if (billRows.length > 0) store?.insertUsage(billRows)
+    } catch (err) {
+      logger.warn('quota.usage_sink_failed', { platform, error: err instanceof Error ? err.message : String(err) })
+    }
   })
   quota.setEarliestDayQuery(
     (platform, accountId) => store?.earliestAccountUsageDay(platform, accountId) ?? null
