@@ -18,14 +18,11 @@ function loadHidden(): boolean {
   }
 }
 
-/** 隐藏态的等长遮罩：保留字符数/量级，看不出具体内容 */
-function maskText(text: string): string {
-  return text.replace(/[^\s·/\\:.-]/g, '•')
-}
-
-function maskTokens(n: number): string {
-  // 保留量级：如 12.6M → xx.xM，4.3 亿 → xx 亿
-  return compactNumber(n).replace(/\d/g, '•')
+/** 隐藏态遮罩：保留首尾各 keep 个字符，中间打码（"业务轨"→"业•轨"，长路径→首2+•••+尾2） */
+function maskKeepEnds(text: string, keep = 1): string {
+  const t = text.trim()
+  if (t.length <= keep * 2) return t.slice(0, 1) + '•'.repeat(3) + (t.length > 1 ? t.slice(-1) : '')
+  return t.slice(0, keep) + '•'.repeat(4) + t.slice(-keep)
 }
 
 export function SessionsPanel({
@@ -59,7 +56,7 @@ export function SessionsPanel({
             className="font-mono text-ui-xs tabular-nums text-foreground-subtlest"
             title={`共 ${sessions.length} 条（最多显示前 120 条）`}
           >
-            {hidden ? '•••' : sessions.length > 120 ? `120 / ${sessions.length}` : sessions.length}
+            {sessions.length > 120 ? `120 / ${sessions.length}` : sessions.length}
           </span>
           <button
             type="button"
@@ -92,19 +89,19 @@ export function SessionsPanel({
                   />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-ui-caption text-foreground">
-                      {hidden ? maskText(title) : title}
+                      {hidden ? maskKeepEnds(title) : title}
                     </span>
                     <span className="block truncate font-mono text-ui-xs text-foreground-subtlest">
                       {hidden
-                        ? `${maskText(s.agent)} · ${relativeTime(s.updatedAt)}`
+                        ? `${maskKeepEnds(shortDir(s.projectDir) ?? s.agent)} · ${relativeTime(s.updatedAt)}`
                         : sub}
                     </span>
                   </span>
                   <span
                     className="shrink-0 font-mono text-ui-xs tabular-nums text-foreground-subtle"
-                    title={hidden ? undefined : `${fullNumber(s.tokens)} tokens / ${s.requests} 次请求`}
+                    title={`${fullNumber(s.tokens)} tokens / ${s.requests} 次请求`}
                   >
-                    {hidden ? (s.tokens > 0 ? maskTokens(s.tokens) : '—') : s.tokens > 0 ? compactNumber(s.tokens) : '—'}
+                    {s.tokens > 0 ? compactNumber(s.tokens) : '—'}
                   </span>
                 </li>
               )
