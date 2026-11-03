@@ -30,6 +30,7 @@ export interface DashboardData {
 export function useDashboard(): {
   data: DashboardData | null
   agents: AgentInfo[]
+  loading: boolean
   trendGroup: 'model' | 'agent'
   setTrendGroup: (g: 'model' | 'agent') => void
   reload: () => Promise<void>
@@ -38,6 +39,7 @@ export function useDashboard(): {
   const agent = useUi((s) => s.agent)
   const [data, setData] = useState<DashboardData | null>(null)
   const [agents, setAgents] = useState<AgentInfo[]>([])
+  const [loading, setLoading] = useState(false)
   const [trendGroup, setTrendGroup] = useState<'model' | 'agent'>('model')
   // 双分组趋势都随 getBoard 一次取回，切换"按模型/按 Agent"零查询
   const trendRef = useRef<BoardData | null>(null)
@@ -47,23 +49,28 @@ export function useDashboard(): {
   const reload = useCallback(async (): Promise<void> => {
     // getCalendar 通道保留在 IPC 契约中备用，看板已改用 trend 呈现每日强度（红队 N-16）
     const seq = ++reloadSeq.current
-    const [board, agentInfos] = await Promise.all([
-      nexus.getBoard(range, agent),
-      nexus.getAgents()
-    ])
-    if (seq !== reloadSeq.current) return // 过期响应丢弃（竞态守卫）
-    trendRef.current = board
-    setData({
-      overview: board.overview,
-      trend: trendGroup === 'model' ? board.trendByModel : board.trendByAgent,
-      byAgent: board.byAgent,
-      byModel: board.byModel,
-      breakdown: board.breakdown,
-      heatmap: board.heatmap,
-      tools: board.tools,
-      sessions: board.sessions
-    })
-    setAgents(agentInfos)
+    setLoading(true)
+    try {
+      const [board, agentInfos] = await Promise.all([
+        nexus.getBoard(range, agent),
+        nexus.getAgents()
+      ])
+      if (seq !== reloadSeq.current) return // 过期响应丢弃（竞态守卫）
+      trendRef.current = board
+      setData({
+        overview: board.overview,
+        trend: trendGroup === 'model' ? board.trendByModel : board.trendByAgent,
+        byAgent: board.byAgent,
+        byModel: board.byModel,
+        breakdown: board.breakdown,
+        heatmap: board.heatmap,
+        tools: board.tools,
+        sessions: board.sessions
+      })
+      setAgents(agentInfos)
+    } finally {
+      if (seq === reloadSeq.current) setLoading(false)
+    }
   }, [range, agent, trendGroup])
 
   // 切换趋势分组：数据已在手，仅重选 series，零查询
@@ -95,5 +102,5 @@ export function useDashboard(): {
     return unsub
   }, [])
 
-  return { data, agents, trendGroup, setTrendGroup, reload }
+  return { data, agents, loading, trendGroup, setTrendGroup, reload }
 }

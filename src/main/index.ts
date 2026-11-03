@@ -180,7 +180,29 @@ app.whenReady()
 
   const adapters = createAdapters(store)
   const query = new QueryService(store)
-  sync = new SyncService(store, adapters, (p) => broadcastSyncProgress(mainWindow, p))
+
+  // 看板缓存：sync 有新数据即失效；随后 3s 错峰预热常用范围（7天+全部），
+  // 让用户切范围基本命中内存（0ms）。预热本身 ~0.7s，撞上用户点击的概率 <2%。
+  let boardWarmer: NodeJS.Timeout | null = null
+  const onSyncDone = (): void => {
+    query.invalidateBoardCache()
+    if (boardWarmer) clearTimeout(boardWarmer)
+    boardWarmer = setTimeout(() => {
+      boardWarmer = null
+      try {
+        const saved = store?.getSetting('range')
+        const preferred = saved === 'today' || saved === '7d' || saved === '30d' || saved === 'month' || saved === 'year' || saved === 'all' ? saved : '7d'
+        query.getBoard(preferred, null)
+        if (preferred !== 'all') query.getBoard('all', null)
+      } catch {
+        // 预热失败静默，用户点击时现算
+      }
+    }, 3000)
+  }
+  sync = new SyncService(store, adapters, (p) => {
+    broadcastSyncProgress(mainWindow, p)
+    if (p.phase === 'done') onSyncDone()
+  })
 
   // v2：系统采集 / 多开实例 / DSH 桥接 / 远程服务
   const system = new SystemCollector()

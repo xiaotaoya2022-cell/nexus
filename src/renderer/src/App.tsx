@@ -51,7 +51,7 @@ export default function App(): JSX.Element {
   const setTheme = useUi((s) => s.setTheme)
   const setAgent = useUi((s) => s.setAgent)
   const sync = useUi((s) => s.sync)
-  const { data, agents, trendGroup, setTrendGroup } = useDashboard()
+  const { data, agents, loading, trendGroup, setTrendGroup } = useDashboard()
   const [toast, setToast] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [retention, setRetention] = useState<number>(0)
@@ -425,7 +425,10 @@ export default function App(): JSX.Element {
       <div className="flex min-h-0 flex-1 gap-1 p-1">
         <AgentSidebar agents={agents} lastSyncAt={sync.finishedAt} />
 
-        <main className="min-w-0 flex-1 space-y-4 overflow-y-auto rounded-xl border border-hairline bg-panel p-4">
+        <main
+          style={{ opacity: loading ? 0.55 : 1 }}
+          className="min-w-0 flex-1 space-y-4 overflow-y-auto rounded-xl border border-hairline bg-panel p-4 transition-opacity duration-150"
+        >
           {!data ? (
             <EmptyState title="正在加载数据" description="首次同步可能需要几秒钟。" />
           ) : totalTokens === 0 && data.sessions.length === 0 ? (

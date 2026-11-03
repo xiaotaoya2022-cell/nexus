@@ -34,7 +34,8 @@ export function EChart({ option, className, onClick }: EChartProps): JSX.Element
   }, [])
 
   useEffect(() => {
-    chartRef.current?.setOption(option, true)
+    // 动画全局关闭：切主题/切范围时图表瞬时成型（200ms 逐段动画是"慢半拍"观感的主因）
+    chartRef.current?.setOption({ animation: false, ...option }, true)
   }, [option])
 
   return <div ref={ref} className={className} />

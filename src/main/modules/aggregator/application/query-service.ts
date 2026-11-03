@@ -350,10 +350,23 @@ export class QueryService {
     }))
   }
 
+  /** 看板结果缓存：agent=null 的主路径按 range 缓存，sync 有新数据时失效。
+   *  同范围二次切换 = 内存直读（0ms），配合 sync 后空闲预热，切范围基本瞬时。 */
+  private boardCache = new Map<string, BoardData>()
+
+  invalidateBoardCache(): void {
+    this.boardCache.clear()
+  }
+
   /** 看板全量聚合：单遍扫描 usage_records，同时产出 overview/趋势(双分组)/byAgent/
    *  byModel/breakdown/heatmap/sessions。代替 9 次独立全表查询（实测 1.65s→~0.4s）。
    *  tool_calls 与 sessions 表为独立小表，各自单查。 */
   getBoard(range: RangeKey, agent: string | null, now = Date.now()): BoardData {
+    const cacheKey = `${range}:${agent ?? 'all'}`
+    if (agent === null) {
+      const hit = this.boardCache.get(cacheKey)
+      if (hit) return hit
+    }
     const since = rangeStartMs(range, now)
     const whereAgent = agent ? 'AND agent = ?' : ''
     const params: Array<string | number> = agent ? [since, agent] : [since]
@@ -523,7 +536,7 @@ export class QueryService {
       )
       .all(...toolParams) as Array<Record<string, unknown>>
 
-    return {
+    const board: BoardData = {
       overview: {
         range,
         agent,
@@ -559,5 +572,7 @@ export class QueryService {
       tools: toolRows.map((r) => ({ tool: String(r.t), count: Number(r.c) || 0 })),
       sessions
     }
+    if (agent === null) this.boardCache.set(cacheKey, board)
+    return board
   }
 }
