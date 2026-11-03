@@ -11,6 +11,7 @@ import { AgentSidebar } from './components/AgentSidebar'
 import { SessionsPanel } from './components/SessionsPanel'
 import { SystemPill } from './components/SystemPill'
 import { AccountPanel } from './components/AccountPanel'
+import { WindowControls } from './components/WindowControls'
 import { AnimatedNumber } from './components/RollingNumber'
 import {
   ChartCard,
@@ -209,14 +210,16 @@ export default function App(): JSX.Element {
 
   return (
     <div className="flex h-full flex-col bg-background text-foreground">
-      {/* 顶栏 */}
-      {/* 顶栏：宽度裁到 WCO 标题栏区内（titlebar-area-width），
-          防止右侧按钮滑进窗口控制钮下方被盖住（v0.2.5 实测主题/导出/设置被盖） */}
+      {/* 顶栏：自绘窗口控制钮（frame:false）——随主题 class 即时变色，无原生 WCO 同步问题。
+          双击顶栏空白切换最大化。 */}
       <header
-        style={{
-          WebkitAppRegion: "drag",
-          width: "env(titlebar-area-width, 100%)"
-        } as React.CSSProperties}
+        onDoubleClick={(e) => {
+          // 双击空白区（非按钮）切换最大化
+          const el = e.target as HTMLElement
+          if (el.closest('button, select, input, a')) return
+          void nexus.toggleMaximizeWindow()
+        }}
+        style={{WebkitAppRegion: "drag"} as React.CSSProperties}
         className="relative flex h-12 shrink-0 items-center gap-4 border-b border-border bg-panel px-4"
       >
         <div className="flex items-baseline gap-2">
@@ -251,6 +254,7 @@ export default function App(): JSX.Element {
         <IconButton style={{WebkitAppRegion: "no-drag"} as React.CSSProperties} title="设置" onClick={() => void openSettings()}>
           <GearIcon />
         </IconButton>
+        <WindowControls />
         {settingsOpen && (
           <>
             <div className="fixed inset-0 z-10" onClick={() => setSettingsOpen(false)} />

@@ -150,6 +150,16 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle('nexus:getBoard', (_e, range: RangeKey, agent: string | null) =>
     q.getBoard(range, agent)
   )
+  // 自绘窗口控制钮（frame:false，主题随渲染层同步）
+  ipcMain.handle('nexus:minimizeWindow', () => deps.getMainWindow()?.minimize())
+  ipcMain.handle('nexus:toggleMaximizeWindow', () => {
+    const win = deps.getMainWindow()
+    if (!win) return
+    if (win.isMaximized()) win.unmaximize()
+    else win.maximize()
+  })
+  ipcMain.handle('nexus:closeWindow', () => deps.getMainWindow()?.close())
+  ipcMain.handle('nexus:isMaximized', () => deps.getMainWindow()?.isMaximized() ?? false)
   ipcMain.handle(
     'nexus:getTrend',
     (_e, range: RangeKey, agent: string | null, groupBy: 'model' | 'agent') =>
@@ -358,6 +368,13 @@ export function broadcastSyncProgress(
 ): void {
   if (win && !win.isDestroyed()) {
     win.webContents.send('nexus:sync-progress', progress)
+  }
+}
+
+// 自绘窗口控制钮：最大化状态变化广播（渲染层切换 □/❐ 图标）
+export function broadcastMaximizeState(win: BrowserWindow | null, maximized: boolean): void {
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('nexus:maximize-changed', maximized)
   }
 }
 

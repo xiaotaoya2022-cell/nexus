@@ -6,6 +6,17 @@ import type { NexusApi, Settings, SyncProgress } from '@shared/types'
 const api: NexusApi = {
   getOverview: (range, agent) => ipcRenderer.invoke('nexus:getOverview', range, agent),
   getBoard: (range, agent) => ipcRenderer.invoke('nexus:getBoard', range, agent),
+  minimizeWindow: () => ipcRenderer.invoke('nexus:minimizeWindow'),
+  toggleMaximizeWindow: () => ipcRenderer.invoke('nexus:toggleMaximizeWindow'),
+  closeWindow: () => ipcRenderer.invoke('nexus:closeWindow'),
+  isMaximized: () => ipcRenderer.invoke('nexus:isMaximized'),
+  onMaximizeChange: (cb: (maximized: boolean) => void) => {
+    const listener = (_e: unknown, maximized: unknown): void => cb(Boolean(maximized))
+    ipcRenderer.on('nexus:maximize-changed', listener)
+    return (): void => {
+      ipcRenderer.removeListener('nexus:maximize-changed', listener)
+    }
+  },
   getTrend: (range, agent, groupBy) => ipcRenderer.invoke('nexus:getTrend', range, agent, groupBy),
   getByAgent: (range) => ipcRenderer.invoke('nexus:getByAgent', range),
   getByModel: (range, agent) => ipcRenderer.invoke('nexus:getByModel', range, agent),

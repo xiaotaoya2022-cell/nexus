@@ -15,7 +15,7 @@ import { QuotaEngine } from './modules/quotas/engine'
 import { logger } from './modules/shared/logger'
 import { PLATFORM_INTEGRATIONS } from './modules/quotas/platforms/registry'
 import { RemoteServer } from './modules/remote/server'
-import { registerIpc, broadcastSyncProgress } from './ipc/register'
+import { registerIpc, broadcastSyncProgress, broadcastMaximizeState } from './ipc/register'
 
 let mainWindow: BrowserWindow | null = null
 let store: NexusStore | null = null
@@ -45,15 +45,11 @@ function createWindow(): void {
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#161616' : '#f8f8f8',
     autoHideMenuBar: true,
     show: false,
-    // 无系统标题栏，自绘顶栏（ZCode 同款形态）；Windows 用 WCO 补回窗口控制钮。
-    // WCO 底色必须跟随主题（用户反馈：切主题后右上角控制钮区域颜色突兀）。
-    // 注意字段名是 color（backgroundColor 会被运行时静默忽略——暗色下白块的根因）
-    titleBarStyle: 'hidden',
-    titleBarOverlay: {
-      symbolColor: nativeTheme.shouldUseDarkColors ? '#d4d4d4' : '#262626',
-      color: nativeTheme.shouldUseDarkColors ? '#202020' : '#ffffff',
-      height: 48
-    },
+    // 无边框窗口：自绘顶栏 + 自绘窗口控制钮。
+    // 不用 titleBarOverlay——实测 Windows 上 runtime setTitleBarOverlay 更新背景
+    // 不可靠（调用成功但 WCO 视觉不刷新，主题切换永远慢半拍）；自绘三钮随渲染层
+    // 主题 class 即时变色，彻底同步。
+    frame: false,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -66,6 +62,9 @@ function createWindow(): void {
     if (!url.startsWith('http://localhost:') && !url.startsWith('file://')) e.preventDefault()
   })
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  // 自绘窗口控制钮：最大化状态变化 → 渲染层切换图标
+  mainWindow.on('maximize', () => broadcastMaximizeState(mainWindow, true))
+  mainWindow.on('unmaximize', () => broadcastMaximizeState(mainWindow, false))
   mainWindow.once('ready-to-show', () => mainWindow?.show())
   mainWindow.on('closed', () => {
     mainWindow = null
@@ -163,20 +162,7 @@ app.whenReady()
   nativeTheme.themeSource = theme === 'light' ? 'light' : 'dark'
 
   // WCO 窗口控制钮区域颜色跟随主题（含启动与运行中切换；updated 在 themeSource 变化时触发）
-  const syncOverlayTheme = (): void => {
-    const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : BrowserWindow.getAllWindows()[0]
-    if (!win) return
-    try {
-      win.setTitleBarOverlay({
-        symbolColor: nativeTheme.shouldUseDarkColors ? '#d4d4d4' : '#262626',
-        color: nativeTheme.shouldUseDarkColors ? '#202020' : '#ffffff'
-      })
-    } catch {
-      // 非 Windows / 无 WCO 时不可用，忽略
-    }
-  }
-  nativeTheme.on('updated', syncOverlayTheme)
-  syncOverlayTheme()
+  // WCO 已移除（自绘窗口控制钮随渲染层主题即时变色），无需原生 overlay 同步
 
   const adapters = createAdapters(store)
   const query = new QueryService(store)

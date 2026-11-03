@@ -139,6 +139,11 @@ export interface TimeRange {
 export interface NexusApi {
   getOverview(range: RangeKey, agent: string | null): Promise<Overview>
   getBoard(range: RangeKey, agent: string | null): Promise<import('./types').BoardData>
+  minimizeWindow(): Promise<void>
+  toggleMaximizeWindow(): Promise<void>
+  closeWindow(): Promise<void>
+  isMaximized(): Promise<boolean>
+  onMaximizeChange(cb: (maximized: boolean) => void): () => void
   getTrend(range: RangeKey, agent: string | null, groupBy: 'model' | 'agent'): Promise<TrendPoint[]>
   getByAgent(range: RangeKey): Promise<NamedStat[]>
   getByModel(range: RangeKey, agent: string | null): Promise<NamedStat[]>
