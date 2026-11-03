@@ -5,6 +5,7 @@ import type { NexusApi, Settings, SyncProgress } from '@shared/types'
 
 const api: NexusApi = {
   getOverview: (range, agent) => ipcRenderer.invoke('nexus:getOverview', range, agent),
+  getBoard: (range, agent) => ipcRenderer.invoke('nexus:getBoard', range, agent),
   getTrend: (range, agent, groupBy) => ipcRenderer.invoke('nexus:getTrend', range, agent, groupBy),
   getByAgent: (range) => ipcRenderer.invoke('nexus:getByAgent', range),
   getByModel: (range, agent) => ipcRenderer.invoke('nexus:getByModel', range, agent),

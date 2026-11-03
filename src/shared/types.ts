@@ -91,6 +91,19 @@ export interface SessionRow {
   requests: number
 }
 
+/** 看板全量数据（单遍扫描聚合，一次 IPC 代替 9 次独立查询） */
+export interface BoardData {
+  overview: Overview
+  trendByModel: TrendPoint[]
+  trendByAgent: TrendPoint[]
+  byAgent: NamedStat[]
+  byModel: NamedStat[]
+  breakdown: TokenTypeStat[]
+  heatmap: HeatmapData
+  tools: ToolStat[]
+  sessions: SessionRow[]
+}
+
 /** DSH（DeepSeek Harness）本地会话行：settings 面板展示用 */
 export interface DshSessionRow {
   sessionId: string
@@ -125,6 +138,7 @@ export interface TimeRange {
 // ── IPC 契约（renderer 经 window.nexus 调用）──
 export interface NexusApi {
   getOverview(range: RangeKey, agent: string | null): Promise<Overview>
+  getBoard(range: RangeKey, agent: string | null): Promise<import('./types').BoardData>
   getTrend(range: RangeKey, agent: string | null, groupBy: 'model' | 'agent'): Promise<TrendPoint[]>
   getByAgent(range: RangeKey): Promise<NamedStat[]>
   getByModel(range: RangeKey, agent: string | null): Promise<NamedStat[]>

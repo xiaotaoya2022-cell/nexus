@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
   AgentInfo,
+  BoardData,
   HeatmapData,
   NamedStat,
   Overview,
@@ -38,28 +39,43 @@ export function useDashboard(): {
   const [data, setData] = useState<DashboardData | null>(null)
   const [agents, setAgents] = useState<AgentInfo[]>([])
   const [trendGroup, setTrendGroup] = useState<'model' | 'agent'>('model')
+  // 双分组趋势都随 getBoard 一次取回，切换"按模型/按 Agent"零查询
+  const trendRef = useRef<BoardData | null>(null)
   const reloadRef = useRef<() => Promise<void>>(async () => {})
   const reloadSeq = useRef(0)
 
   const reload = useCallback(async (): Promise<void> => {
     // getCalendar 通道保留在 IPC 契约中备用，看板已改用 trend 呈现每日强度（红队 N-16）
     const seq = ++reloadSeq.current
-    const [overview, trend, byAgent, byModel, breakdown, heatmap, tools, sessions, agentInfos] =
-      await Promise.all([
-        nexus.getOverview(range, agent),
-        nexus.getTrend(range, agent, trendGroup),
-        nexus.getByAgent(range),
-        nexus.getByModel(range, agent),
-        nexus.getTokenTypeBreakdown(range, agent),
-        nexus.getHeatmap(range, agent),
-        nexus.getToolStats(range, agent),
-        nexus.getSessions(range, agent, 120),
-        nexus.getAgents()
-      ])
+    const [board, agentInfos] = await Promise.all([
+      nexus.getBoard(range, agent),
+      nexus.getAgents()
+    ])
     if (seq !== reloadSeq.current) return // 过期响应丢弃（竞态守卫）
-    setData({ overview, trend, byAgent, byModel, breakdown, heatmap, tools, sessions })
+    trendRef.current = board
+    setData({
+      overview: board.overview,
+      trend: trendGroup === 'model' ? board.trendByModel : board.trendByAgent,
+      byAgent: board.byAgent,
+      byModel: board.byModel,
+      breakdown: board.breakdown,
+      heatmap: board.heatmap,
+      tools: board.tools,
+      sessions: board.sessions
+    })
     setAgents(agentInfos)
   }, [range, agent, trendGroup])
+
+  // 切换趋势分组：数据已在手，仅重选 series，零查询
+  useEffect(() => {
+    const board = trendRef.current
+    if (!board) return
+    setData((prev) =>
+      prev
+        ? { ...prev, trend: trendGroup === 'model' ? board.trendByModel : board.trendByAgent }
+        : prev
+    )
+  }, [trendGroup])
 
   reloadRef.current = reload
 

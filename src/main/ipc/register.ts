@@ -146,6 +146,10 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle('nexus:getOverview', (_e, range: RangeKey, agent: string | null) =>
     q.getOverview(range, agent)
   )
+  // 看板全量：单遍扫描聚合（代替渲染层 9 个 IPC 串行全表扫）
+  ipcMain.handle('nexus:getBoard', (_e, range: RangeKey, agent: string | null) =>
+    q.getBoard(range, agent)
+  )
   ipcMain.handle(
     'nexus:getTrend',
     (_e, range: RangeKey, agent: string | null, groupBy: 'model' | 'agent') =>
