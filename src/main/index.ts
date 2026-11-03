@@ -42,6 +42,8 @@ function createWindow(): void {
     minWidth: 1080,
     minHeight: 680,
     title: 'Nexus',
+    // 应用图标：任务栏/Alt+Tab（安装包图标由 electron-builder 从 build/icon.ico 取）
+    icon: join(app.getAppPath(), 'build/icon.ico'),
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#161616' : '#f8f8f8',
     autoHideMenuBar: true,
     show: false,
