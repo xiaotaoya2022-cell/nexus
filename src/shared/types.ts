@@ -1,7 +1,7 @@
 // Nexus 共享类型：主进程 / preload / 渲染进程共用。
 // 只放纯数据结构与 API 契约，禁止引入 Node 专用模块。
 
-export type RangeKey = 'today' | '7d' | '30d' | 'month' | 'year' | 'all'
+export type RangeKey = 'today' | '7d' | '30d' | 'month' | 'year' | 'all' | 'custom'
 
 export type AgentStatus = 'active' | 'idle' | 'offline' | 'nodata'
 
@@ -138,7 +138,9 @@ export interface TimeRange {
 // ── IPC 契约（renderer 经 window.nexus 调用）──
 export interface NexusApi {
   getOverview(range: RangeKey, agent: string | null): Promise<Overview>
-  getBoard(range: RangeKey, agent: string | null): Promise<import('./types').BoardData>
+  getBoard(range: RangeKey, agent: string | null, customStart?: number, customEnd?: number): Promise<import('./types').BoardData>
+  getCustomRange(): Promise<{ start: number; end: number } | null>
+  setCustomRange(start: number, end: number): Promise<{ start: number; end: number }>
   minimizeWindow(): Promise<void>
   toggleMaximizeWindow(): Promise<void>
   closeWindow(): Promise<void>

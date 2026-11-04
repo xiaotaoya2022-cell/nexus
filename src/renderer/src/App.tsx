@@ -63,15 +63,45 @@ export default function App(): JSX.Element {
   const [dshStatus, setDshStatus] = useState<Awaited<ReturnType<typeof nexus.getDshStatus>> | null>(null)
   const [dshSessions, setDshSessions] = useState<Awaited<ReturnType<typeof nexus.getDshSessions>>>([])
 
-  // 启动时读取主题与上次时间范围
+  // 启动时读取主题与上次时间范围（含自定义范围的起止）
   useEffect(() => {
     void (async () => {
       const s = await nexus.getSettings()
       useUi.getState().setTheme(s.theme)
       const r = await nexus.getSavedRange()
       useUi.getState().setRange(r)
+      const cr = await nexus.getCustomRange()
+      if (cr) useUi.getState().setCustomRange(cr)
     })()
   }, [])
+
+  // 自定义时间范围选择浮层
+  const [customPickerOpen, setCustomPickerOpen] = useState(false)
+  // 表单初值：默认最近 7 天（本地时区零点到当前）
+  const [customFrom, setCustomFrom] = useState(() => {
+    const d = new Date(Date.now() - 7 * 86400_000)
+    const p = (n: number): string => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T00:00`
+  })
+  const [customTo, setCustomTo] = useState(() => {
+    const d = new Date()
+    const p = (n: number): string => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T23:59`
+  })
+
+  const applyCustomRange = async (): Promise<void> => {
+    const start = new Date(customFrom).getTime()
+    const end = new Date(customTo).getTime()
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+      setToast('自定义范围无效：结束时间需晚于开始时间')
+      return
+    }
+    const saved = await nexus.setCustomRange(start, end)
+    useUi.getState().setCustomRange(saved)
+    useUi.getState().setRange('custom')
+    setCustomPickerOpen(false)
+    setToast(`已切换到自定义范围（${new Date(start).toLocaleDateString()} ~ ${new Date(end).toLocaleDateString()}）`)
+  }
 
   // 主题 class 必须在子组件读取 CSS 变量（chartTokens）之前生效：
   // useLayoutEffect 先落 class，再以 epoch 触发重渲染与图表 option 重建
@@ -238,15 +268,61 @@ export default function App(): JSX.Element {
         {sync.phase === 'running' && (
           <span className="text-ui-xs text-foreground-subtle">同步中…</span>
         )}
-        <div style={{WebkitAppRegion: "no-drag"} as React.CSSProperties}>
+        <div className="relative" style={{WebkitAppRegion: "no-drag"} as React.CSSProperties}>
           <PillSwitcher
-            options={RANGE_OPTIONS}
+            options={[...RANGE_OPTIONS, { key: 'custom' as RangeKey, label: '自定义' }]}
             value={range}
             onChange={(r: RangeKey) => {
+              if (r === 'custom') {
+                // 打开自定义浮层（若已有自定义范围则直接沿用，浮层内可改）
+                setCustomPickerOpen(true)
+                return
+              }
               useUi.getState().setRange(r)
               void nexus.setSavedRange(r)
             }}
           />
+          {customPickerOpen && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setCustomPickerOpen(false)} />
+              <div className="nx-fade-in absolute right-0 top-9 z-20 w-80 rounded-xl border border-border bg-card p-4">
+                <div className="mb-3 text-ui-base font-medium">自定义时间范围</div>
+                <label className="mb-1 block text-ui-xs text-foreground-subtle">开始</label>
+                <input
+                  type="datetime-local"
+                  value={customFrom}
+                  onChange={(e) => setCustomFrom(e.target.value)}
+                  className="h-8 w-full rounded-lg border border-border bg-card px-2 font-mono text-ui-sm text-foreground"
+                />
+                <label className="mb-1 mt-3 block text-ui-xs text-foreground-subtle">结束</label>
+                <input
+                  type="datetime-local"
+                  value={customTo}
+                  onChange={(e) => setCustomTo(e.target.value)}
+                  className="h-8 w-full rounded-lg border border-border bg-card px-2 font-mono text-ui-sm text-foreground"
+                />
+                <div className="mt-4 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void applyCustomRange()}
+                    className="h-8 flex-1 rounded-lg bg-chart-1 px-2 text-ui-sm font-medium text-white transition-colors duration-150 hover:opacity-90"
+                  >
+                    应用
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCustomPickerOpen(false)}
+                    className="h-8 flex-1 rounded-lg bg-secondary px-2 text-ui-sm text-foreground transition-colors duration-150 hover:bg-surface-hover"
+                  >
+                    取消
+                  </button>
+                </div>
+                <div className="mt-2 text-ui-xs text-foreground-subtlest">
+                  按数据的实际发生时间过滤（精确到分钟），设置重启保持。
+                </div>
+              </div>
+            </>
+          )}
         </div>
         <SystemPill />
         <AccountPanel />

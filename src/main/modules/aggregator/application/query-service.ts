@@ -361,15 +361,22 @@ export class QueryService {
   /** 看板全量聚合：单遍扫描 usage_records，同时产出 overview/趋势(双分组)/byAgent/
    *  byModel/breakdown/heatmap/sessions。代替 9 次独立全表查询（实测 1.65s→~0.4s）。
    *  tool_calls 与 sessions 表为独立小表，各自单查。 */
-  getBoard(range: RangeKey, agent: string | null, now = Date.now()): BoardData {
-    const cacheKey = `${range}:${agent ?? 'all'}`
-    if (agent === null) {
+  getBoard(
+    range: RangeKey,
+    agent: string | null,
+    now = Date.now(),
+    custom?: { start: number; end: number }
+  ): BoardData {
+    // 自定义时间段：since/until 直接给定（不缓存——范围组合无界）
+    const since = custom ? custom.start : rangeStartMs(range, now)
+    const until = custom ? custom.end : now
+    const cacheKey = custom ? `custom:${since}:${until}:${agent ?? 'all'}` : `${range}:${agent ?? 'all'}`
+    if (agent === null && !custom) {
       const hit = this.boardCache.get(cacheKey)
       if (hit) return hit
     }
-    const since = rangeStartMs(range, now)
     const whereAgent = agent ? 'AND agent = ?' : ''
-    const params: Array<string | number> = agent ? [since, agent] : [since]
+    const params: Array<string | number> = agent ? [since, until, agent] : [since, until]
 
     // ── 主扫描：usage_records 一次物化，JS 单遍聚合 ──
     const rows = this.store.db
@@ -377,7 +384,7 @@ export class QueryService {
         `SELECT agent, model, session_id, ts,
                 input_tokens i, output_tokens o, reasoning_tokens r,
                 cache_read_tokens cr, cache_write_tokens cw, COALESCE(requests, 1) n
-         FROM usage_records WHERE ts >= ? ${whereAgent}`
+         FROM usage_records WHERE ts >= ? AND ts <= ? ${whereAgent}`
       )
       .all(...params) as Array<Record<string, unknown>>
 
@@ -468,8 +475,8 @@ export class QueryService {
       const result = [...points.values()].sort((x, y) => (x.bucket < y.bucket ? -1 : 1))
       if (range !== 'all' && result.length > 1) {
         const filled: TrendPoint[] = []
-        const cursor = new Date(rangeStartMs(range, now))
-        while (cursor.getTime() <= now) {
+        const cursor = new Date(custom ? custom.start : rangeStartMs(range, now))
+        while (cursor.getTime() <= until) {
           const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}-${String(cursor.getDate()).padStart(2, '0')}`
           filled.push(points.get(key) ?? { bucket: key, total: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, series: {} })
           cursor.setDate(cursor.getDate() + 1)
@@ -572,7 +579,7 @@ export class QueryService {
       tools: toolRows.map((r) => ({ tool: String(r.t), count: Number(r.c) || 0 })),
       sessions
     }
-    if (agent === null) this.boardCache.set(cacheKey, board)
+    if (agent === null && !custom) this.boardCache.set(cacheKey, board)
     return board
   }
 }

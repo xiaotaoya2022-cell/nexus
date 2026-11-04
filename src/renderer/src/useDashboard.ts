@@ -37,6 +37,7 @@ export function useDashboard(): {
 } {
   const range = useUi((s) => s.range)
   const agent = useUi((s) => s.agent)
+  const customRange = useUi((s) => s.customRange)
   const [data, setData] = useState<DashboardData | null>(null)
   const [agents, setAgents] = useState<AgentInfo[]>([])
   const [loading, setLoading] = useState(false)
@@ -51,8 +52,9 @@ export function useDashboard(): {
     const seq = ++reloadSeq.current
     setLoading(true)
     try {
+      const custom = range === 'custom' && customRange ? customRange : undefined
       const [board, agentInfos] = await Promise.all([
-        nexus.getBoard(range, agent),
+        nexus.getBoard(range, agent, custom?.start, custom?.end),
         nexus.getAgents()
       ])
       if (seq !== reloadSeq.current) return // 过期响应丢弃（竞态守卫）
@@ -71,7 +73,7 @@ export function useDashboard(): {
     } finally {
       if (seq === reloadSeq.current) setLoading(false)
     }
-  }, [range, agent, trendGroup])
+  }, [range, agent, trendGroup, customRange])
 
   // 切换趋势分组：数据已在手，仅重选 series，零查询
   useEffect(() => {

@@ -161,9 +161,42 @@ export function registerIpc(deps: IpcDeps): void {
     q.getOverview(range, agent)
   )
   // 看板全量：单遍扫描聚合（代替渲染层 9 个 IPC 串行全表扫）
-  ipcMain.handle('nexus:getBoard', (_e, range: RangeKey, agent: string | null) =>
-    q.getBoard(range, agent)
+  // 自定义范围：customStart/customEnd（epoch ms）提供时覆盖 range 推导
+  ipcMain.handle(
+    'nexus:getBoard',
+    (_e, range: RangeKey, agent: string | null, customStart: unknown, customEnd: unknown) => {
+      const custom =
+        typeof customStart === 'number' &&
+        typeof customEnd === 'number' &&
+        Number.isFinite(customStart) &&
+        Number.isFinite(customEnd) &&
+        customEnd > customStart
+          ? { start: customStart, end: customEnd }
+          : undefined
+      return q.getBoard(range, agent, Date.now(), custom)
+    }
   )
+  // 自定义时间范围持久化（重启保持）
+  ipcMain.handle('nexus:getCustomRange', () => {
+    const raw = deps.store.getSetting('customRange')
+    if (!raw) return null
+    try {
+      const parsed = JSON.parse(raw) as { start?: unknown; end?: unknown }
+      if (typeof parsed.start === 'number' && typeof parsed.end === 'number') {
+        return { start: parsed.start, end: parsed.end }
+      }
+    } catch {
+      // 坏数据按未设置处理
+    }
+    return null
+  })
+  ipcMain.handle('nexus:setCustomRange', (_e, start: unknown, end: unknown) => {
+    if (typeof start !== 'number' || typeof end !== 'number' || end <= start) {
+      throw new Error('自定义范围无效')
+    }
+    deps.store.setSetting('customRange', JSON.stringify({ start, end }))
+    return { start, end }
+  })
   // 自绘窗口控制钮（frame:false，主题随渲染层同步）
   ipcMain.handle('nexus:minimizeWindow', () => deps.getMainWindow()?.minimize())
   ipcMain.handle('nexus:toggleMaximizeWindow', () => {
@@ -326,11 +359,16 @@ export function registerIpc(deps: IpcDeps): void {
   })
   ipcMain.handle('nexus:getSavedRange', (): RangeKey => {
     const v = deps.store.getSetting('range')
-    return v === 'today' || v === '7d' || v === '30d' || v === 'month' || v === 'year' || v === 'all' ? v : '7d'
+    return v === 'today' || v === '7d' || v === '30d' || v === 'month' || v === 'year' || v === 'all' || v === 'custom'
+      ? v
+      : '7d'
   })
   ipcMain.handle('nexus:setSavedRange', (_e, range: unknown): RangeKey => {
     const v = String(range)
-    const valid: RangeKey = v === 'today' || v === '7d' || v === '30d' || v === 'month' || v === 'year' || v === 'all' ? (v as RangeKey) : '7d'
+    const valid: RangeKey =
+      v === 'today' || v === '7d' || v === '30d' || v === 'month' || v === 'year' || v === 'all' || v === 'custom'
+        ? (v as RangeKey)
+        : '7d'
     deps.store.setSetting('range', valid)
     return valid
   })

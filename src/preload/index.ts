@@ -5,7 +5,11 @@ import type { NexusApi, Settings, SyncProgress } from '@shared/types'
 
 const api: NexusApi = {
   getOverview: (range, agent) => ipcRenderer.invoke('nexus:getOverview', range, agent),
-  getBoard: (range, agent) => ipcRenderer.invoke('nexus:getBoard', range, agent),
+  getBoard: (range, agent, customStart?: number, customEnd?: number) =>
+    ipcRenderer.invoke('nexus:getBoard', range, agent, customStart, customEnd),
+  getCustomRange: () => ipcRenderer.invoke('nexus:getCustomRange'),
+  setCustomRange: (start: number, end: number) =>
+    ipcRenderer.invoke('nexus:setCustomRange', start, end),
   minimizeWindow: () => ipcRenderer.invoke('nexus:minimizeWindow'),
   toggleMaximizeWindow: () => ipcRenderer.invoke('nexus:toggleMaximizeWindow'),
   closeWindow: () => ipcRenderer.invoke('nexus:closeWindow'),
