@@ -40,7 +40,13 @@ function underAllowedRoot(resolved: string): boolean {
 
 function safeMtime(path: string): number | null {
   const resolved = resolve(path)
-  if (!isAbsolute(resolved) || resolved.includes('..') || !underAllowedRoot(resolved)) return null
+  // 白名单含 ~/.zcode（CLI 共享 HOME——用量库与 WAL 都在这，实例 userData 之外）
+  if (
+    !isAbsolute(resolved) ||
+    resolved.includes('..') ||
+    (!underAllowedRoot(resolved) && resolved !== resolve(defaultZcodeHome()) && !resolved.startsWith(resolve(defaultZcodeHome()) + sep))
+  )
+    return null
   try {
     if (!existsSync(resolved)) return null
     return statSync(resolved).mtimeMs
@@ -50,12 +56,20 @@ function safeMtime(path: string): number | null {
 }
 
 function isRunning(ud: string): boolean {
-  // WAL 存在且 5 分钟内有写入 → 该实例的本地库处于打开状态
+  // WAL 存在且 5 分钟内有写入 → 该实例的本地库处于打开状态。
+  // 注意：所有实例（含 cockpit 多开）的 CLI 层都写 HOME 级 ~/.zcode/v2/（共享），
+  // 实例 userData 下的 v2/ 只在特定场景出现——两处都检查。
   for (const marker of ['v2/tasks-index.sqlite-wal', 'tasks-index.sqlite-wal']) {
     const m = safeMtime(join(ud, marker))
     if (m != null && Date.now() - m < RUNNING_WAL_FRESH_MS) return true
   }
   return false
+}
+
+/** 全局共享 WAL（~/.zcode/v2/）：只要任一实例存活，它就在被写入。 */
+function sharedHomeWalFresh(): boolean {
+  const m = safeMtime(join(defaultZcodeHome(), 'v2', 'tasks-index.sqlite-wal'))
+  return m != null && Date.now() - m < RUNNING_WAL_FRESH_MS
 }
 
 function pickRecentProject(ud: string): string | null {
@@ -120,6 +134,12 @@ export class ZcodeManager {
     }
     // 活跃的排前，其次按名称
     out.sort((a, b) => (b.lastActiveAt ?? 0) - (a.lastActiveAt ?? 0) || a.name.localeCompare(b.name))
+    // 共享 WAL 新鲜（任一实例存活）但逐实例证据缺失时（WAL 全在 HOME 共享层），
+    // 把"default"实例标记为 running——语义是"存在存活的 ZCode 进程在写共享库"。
+    if (out.length > 0 && out.every((i) => !i.running) && sharedHomeWalFresh()) {
+      const target = out.find((i) => i.name === 'default') ?? out[0]
+      target.running = true
+    }
     this.cache = out
     this.cacheAt = now
     return out

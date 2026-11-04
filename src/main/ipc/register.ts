@@ -107,7 +107,21 @@ function buildAgentInfos(deps: IpcDeps): AgentInfo[] {
     const detected = adapter ? adapter.detect() : detectPresence(deps.presence.find((p) => p.id === id)?.detectPaths ?? [])
     // Antigravity：接入 Cockpit 感知——把"如何启用采集"写进 note（调研报告 §落地建议）
     const cockpitNote = id === 'antigravity' ? deps.cockpit.noteFor() : null
-    const note = cockpitNote ?? (detected ? meta.note : null)
+    let note = cockpitNote ?? (detected ? meta.note : null)
+    // ZCode：多开实例感知——所有实例共用 HOME 级 ~/.zcode/cli/db（数据天然全量统计），
+    // 这里把"存活实例数"透出到侧栏，让多开参与统计可感知。
+    if (id === 'zcode') {
+      try {
+        const insts = deps.zcode.instances()
+        const running = insts.filter((i) => i.running).length
+        if (running > 0) {
+          const instText = `${running} 个实例运行中`
+          note = note ? `${instText} · ${note}` : instText
+        }
+      } catch {
+        // 实例枚举失败不影响主统计
+      }
+    }
     const today = todayByAgent.get(id)
     const act = activity.get(id)
     const so = sessionOnly.get(id)
