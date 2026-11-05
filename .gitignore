@@ -19,6 +19,10 @@ release/
 .DS_Store
 Thumbs.db
 
+# 临时调试截图（不入库）
+tmp-*.png
+tmp-*.jpg
+
 # TS build artifacts
 *.tsbuildinfo
 

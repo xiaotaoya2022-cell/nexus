@@ -2,7 +2,9 @@
 
 一个本地优先的、单一窗口的桌面应用：读取本机各 AI Agent 的本地日志/数据库与官方用量接口，把 Token 消耗、真实花费、会话、工具调用汇总成一块精美看板。**纯监控，零干预**——不改任何 Agent 的配置，不干预任何 Agent 的运行。
 
-![dark](out/board-dark.png)
+![dark](docs/screenshots/board-dark.png)
+
+![light](docs/screenshots/board-light.png)
 
 ## 核心特性
 
@@ -59,7 +61,7 @@ NEXUS_DEBUG=1 npm run dev        # 转发渲染进程 console 到终端
 ## 治理
 
 - 文档同步：`docs/modules/index.md` + 各模块 md，秒级时间戳。
-- 红蓝对抗审计：AI 子代理循环审计直至通过，结论见 `PROJECT_LAUNCH_REPORT.md`。
+- 红蓝对抗审计：AI 子代理循环审计直至通过，结论见 `docs/reports/PROJECT_LAUNCH_REPORT.md`。
 
 ---
 负责人/作者：xiaotaoya2022 ｜ 版本：v0.2.24 ｜ 仓库：`xiaotaoya2022-cell/nexus`（私有）
