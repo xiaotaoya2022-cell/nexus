@@ -135,4 +135,4 @@ NEXUS_DEBUG=1 npm run dev        # 转发渲染进程 console 到终端
 
 **牛码 & jayc-labs 出品**
 
-> 你的 Agent 用量也可以被守护：[ApiSpace](https://apispace.top/sign-up?aff=fQ1H)
+> 你的 Agent 用量也可以被守护：[ApiSpace](https://apispace.top)
