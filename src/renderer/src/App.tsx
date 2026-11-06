@@ -258,7 +258,7 @@ export default function App(): JSX.Element {
             src={nexusLogo}
             alt=""
             aria-hidden
-            className="h-6 w-6 rounded-md"
+            className="logo-mark h-6 w-6 rounded-md"
             draggable={false}
           />
           <span className="text-ui-base font-medium">Nexus</span>
