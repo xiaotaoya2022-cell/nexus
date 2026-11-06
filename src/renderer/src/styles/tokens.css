@@ -256,8 +256,3 @@ header a,
 header [role='button'] {
   -webkit-app-region: no-drag;
 }
-
-/* 标题栏品牌 mark：深色主题用提亮灰白原色；浅色主题反相压暗保证对比 */
-.theme-light img.logo-mark {
-  filter: invert(1) brightness(0.3);
-}

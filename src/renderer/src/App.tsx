@@ -12,7 +12,8 @@ import { SessionsPanel } from './components/SessionsPanel'
 import { SystemPill } from './components/SystemPill'
 import { AccountPanel } from './components/AccountPanel'
 import { WindowControls } from './components/WindowControls'
-import nexusLogo from './assets/nexus-logo.png'
+import nexusLogoDark from './assets/nexus-logo-dark.png'
+import nexusLogoLight from './assets/nexus-logo-light.png'
 import { AnimatedNumber } from './components/RollingNumber'
 import {
   ChartCard,
@@ -255,10 +256,10 @@ export default function App(): JSX.Element {
       >
         <div className="flex items-center gap-2">
           <img
-            src={nexusLogo}
+            src={theme === 'light' ? nexusLogoLight : nexusLogoDark}
             alt=""
             aria-hidden
-            className="logo-mark h-6 w-6 rounded-md"
+            className="h-6 w-6 rounded-md"
             draggable={false}
           />
           <span className="text-ui-base font-medium">Nexus</span>

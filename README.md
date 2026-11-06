@@ -26,7 +26,7 @@
 
 Nexus 的回答：**在你烧的时候，就把它变成资产。** 首次同步即把全量历史快照进自有库，此后增量追加——从今天起，你的每一亿 token 都有账可查、有图可看、有单可对。
 
-![dark](docs/screenshots/board-dark.png)
+![overview](docs/screenshots/board-overview.png)
 
 ## 570 亿 tokens 的真实环境里生长出来
 
@@ -34,15 +34,15 @@ Nexus 的回答：**在你烧的时候，就把它变成资产。** 首次同步
 
 | 实拍指标 | 数值 |
 | --- | --- |
-| 累计 Token 消耗 | **572.3 亿**（57,230,910,682） |
-| 会话 | 1,324 |
+| 累计 Token 消耗 | **573.0 亿**（57,304,822,958） |
+| 会话 | 1,326 |
 | 工具调用 | 13.7 万 |
 | 模型 | 35 个 |
 | 有精确数据的 Agent | 8 个 |
 
 **先有重度使用，才有工具**——每一个数据源接入方案，都是在真实海量数据上撞出来的。
 
-![light](docs/screenshots/board-light.png)
+![week](docs/screenshots/board-week.png)
 
 ## 承认先例，划清差异
 
