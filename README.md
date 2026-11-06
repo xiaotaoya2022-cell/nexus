@@ -1,6 +1,16 @@
-# Nexus — 本地 AI Agent 算力监控中心
-
-![license](https://img.shields.io/badge/license-MIT-green) ![version](https://img.shields.io/badge/version-v0.2.24-blue) ![platform](https://img.shields.io/badge/platform-Windows-lightgrey) ![privacy](https://img.shields.io/badge/privacy-纯本地-success)
+<div align="center">
+  <img src="docs/brand/nexus-logo.png" width="180" alt="Nexus logo" />
+  <h1>Nexus</h1>
+  <p><strong>本地 AI Agent 算力监控中心</strong></p>
+  <p><em>万千 Token，汇于一处；每一次消耗，皆有记录。</em><br/>
+  <sub>EVERY TOKEN FINDS ITS RECORD. ｜ 品牌理念：聚合 · 计量 · 留存 · 追溯</sub></p>
+  <p>
+    <img src="https://img.shields.io/badge/license-MIT-green" alt="license"/>
+    <img src="https://img.shields.io/badge/version-v0.2.24-blue" alt="version"/>
+    <img src="https://img.shields.io/badge/platform-Windows-lightgrey" alt="platform"/>
+    <img src="https://img.shields.io/badge/privacy-纯本地-success" alt="privacy"/>
+  </p>
+</div>
 
 > 「重度 token 消耗 ≈ AI 编程能力跃迁的必要过程；用量是这段经历的计量学证据——**你烧过的 token 就是你升级的台阶**。」
 >
@@ -24,9 +34,9 @@ Nexus 的回答：**在你烧的时候，就把它变成资产。** 首次同步
 
 | 实拍指标 | 数值 |
 | --- | --- |
-| 累计 Token 消耗 | **570.5 亿**（57,048,538,655） |
-| 会话 | 1,317 |
-| 工具调用 | 13.59 万 |
+| 累计 Token 消耗 | **572.3 亿**（57,230,910,682） |
+| 会话 | 1,324 |
+| 工具调用 | 13.7 万 |
 | 模型 | 35 个 |
 | 有精确数据的 Agent | 8 个 |
 
