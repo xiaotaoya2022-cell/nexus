@@ -78,6 +78,18 @@ const SCHEMA_STATEMENTS: string[] = [
     updated_at INTEGER,
     PRIMARY KEY (platform, account_id, day)
   )`,
+  // 账号配额快照（额度制平台如 Antigravity：每轮 fetchQuota 落一行，
+  // ts 取整到分钟；remaining 随时间下行即为真实消耗曲线的数据源）
+  `CREATE TABLE IF NOT EXISTS account_quota_snapshots (
+    platform TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    label TEXT NOT NULL,
+    ts INTEGER NOT NULL,
+    used_percent REAL,
+    remaining_percent REAL,
+    reset_at INTEGER,
+    PRIMARY KEY (platform, account_id, label, ts)
+  )`,
   // 一次性口径修正（正确性审计 F1）：codex subset 型事件 input 含缓存、reasoning⊆output，
   // 按 total_tokens 判别归一。dedupe_key 含 total 不可得，故以"codex 存在且未标记"为条件全量重算：
   // 由增量同步以 upsert 方式刷新（总口径行 ts/model 不变），此处仅将明显双计的行做保守修正。
@@ -299,6 +311,73 @@ export class NexusStore implements StoreWriter {
       .prepare('SELECT MIN(day) d FROM account_usage_daily WHERE platform = ? AND account_id = ?')
       .get(platform, accountId) as { d: string | null } | undefined
     return row?.d ?? null
+  }
+
+  /**
+   * 账号配额快照落库（额度制平台每轮 fetchQuota 调一次）。
+   * ts 取整到 5 分钟：同窗多轮只保留最后一行（INSERT OR REPLACE），抑制轮询噪声。
+   */
+  upsertAccountQuotaSnapshots(
+    platform: string,
+    accountId: string,
+    windows: Array<{ label: string; usedPercent: number | null; remainingPercent: number | null; resetAt: number | null }>
+  ): number {
+    if (windows.length === 0) return 0
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO account_quota_snapshots
+        (platform, account_id, label, ts, used_percent, remaining_percent, reset_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `)
+    let n = 0
+    this.begin()
+    try {
+      const ts = Math.floor(Date.now() / 300_000) * 300_000
+      for (const w of windows) {
+        stmt.run(
+          platform,
+          accountId,
+          w.label,
+          ts,
+          w.usedPercent,
+          w.remainingPercent,
+          w.resetAt
+        )
+        n++
+      }
+      this.commit()
+    } catch (err) {
+      this.rollback()
+      throw err
+    }
+    return n
+  }
+
+  /** 查询账号配额快照序列（近 days 天，按时间升序；画额度消耗趋势用）。 */
+  queryAccountQuotaSnapshots(
+    platform: string,
+    accountId: string,
+    days: number
+  ): Array<{ label: string; ts: number; usedPercent: number | null; remainingPercent: number | null; resetAt: number | null }> {
+    const since = Date.now() - days * 86400_000
+    const rows = this.db
+      .prepare(
+        `SELECT label, ts, used_percent, remaining_percent, reset_at FROM account_quota_snapshots
+         WHERE platform = ? AND account_id = ? AND ts >= ? ORDER BY ts ASC`
+      )
+      .all(platform, accountId, since) as Array<{
+      label: string
+      ts: number
+      used_percent: number | null
+      remaining_percent: number | null
+      reset_at: number | null
+    }>
+    return rows.map((r) => ({
+      label: String(r.label),
+      ts: Number(r.ts),
+      usedPercent: r.used_percent == null ? null : Number(r.used_percent),
+      remainingPercent: r.remaining_percent == null ? null : Number(r.remaining_percent),
+      resetAt: r.reset_at == null ? null : Number(r.reset_at)
+    }))
   }
 
   // ── sync_state ──

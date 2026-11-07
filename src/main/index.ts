@@ -275,6 +275,11 @@ app.whenReady()
   quota.setEarliestDayQuery(
     (platform, accountId) => store?.earliestAccountUsageDay(platform, accountId) ?? null
   )
+  // 额度快照落库：额度制平台（Antigravity 等）每轮 fetchQuota 的窗口剩余度 → 趋势曲线数据
+  quota.setQuotaSnapshotSink((platform, accountId, windows) => {
+    if (!store || windows.length === 0) return
+    store.upsertAccountQuotaSnapshots(platform, accountId, windows)
+  })
   let remoteSecret = store.getSetting('remoteSecret')
   if (!remoteSecret) {
     remoteSecret = randomBytes(32).toString('hex')

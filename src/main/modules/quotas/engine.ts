@@ -30,6 +30,13 @@ const EMPTY_VIEWS: Record<string, AccountQuotaView[]> = {}
 /** 账号每日真实消耗落库回调（platform, accountId, rows） */
 export type UsageSink = (platform: string, accountId: string, rows: import('@shared/quotas').AccountUsagePoint[]) => void
 
+/** 账号配额快照落库回调（额度制平台每轮 fetchQuota 落一行，画额度消耗趋势） */
+export type QuotaSnapshotSink = (
+  platform: string,
+  accountId: string,
+  windows: Array<{ label: string; usedPercent: number | null; remainingPercent: number | null; resetAt: number | null }>
+) => void
+
 export class QuotaEngine {
   private integrations: PlatformIntegration[] = []
   private views: Record<string, AccountQuotaView[]> = {}
@@ -38,6 +45,7 @@ export class QuotaEngine {
   /** 告警去重：account:window → 上次告警时间（6h 内不重复） */
   private lastAlertAt = new Map<string, number>()
   private onUsage?: UsageSink
+  private onQuotaSnapshot?: QuotaSnapshotSink
   /** 查询某平台账号已采集的最早账单日（YYYY-MM-DD），用于 fetchUsage 增量起点 */
   private earliestDayQuery?: (platform: string, accountId: string) => string | null
 
@@ -58,6 +66,11 @@ export class QuotaEngine {
   /** 注入已采集最早日查询（main 侧接 NexusStore.earliestAccountUsageDay）。 */
   setEarliestDayQuery(q: (platform: string, accountId: string) => string | null): void {
     this.earliestDayQuery = q
+  }
+
+  /** 注入配额快照落库通道（main 侧接 NexusStore.upsertAccountQuotaSnapshots）。 */
+  setQuotaSnapshotSink(sink: QuotaSnapshotSink): void {
+    this.onQuotaSnapshot = sink
   }
 
   registerIntegrations(list: PlatformIntegration[]): void {
@@ -242,6 +255,15 @@ export class QuotaEngine {
         const quota = await this.fetchWithRefresh(integration, cred, platformId)
         views.push({ ...base, planLabel: quota.planLabel, windows: quota.windows, extra: quota.extra })
         this.checkAlerts(base, quota.windows)
+        // 额度快照落库（每轮一行/窗口）：额度制平台（如 Antigravity）的历史消耗证据链
+        try {
+          this.onQuotaSnapshot?.(platformId, base.accountId, quota.windows)
+        } catch (snapErr) {
+          logger.warn('quota.snapshot_failed', {
+            platform: platformId,
+            error: snapErr instanceof Error ? snapErr.message : String(snapErr)
+          })
+        }
         // 账号级每日真实消耗（如 DeepSeek 官方账单）→ 落库。
         // sinceDay=库内已采集最早日：全量回溯只在首采时发生，之后每轮覆盖最早日至今。
         if (typeof integration.fetchUsage === 'function') {

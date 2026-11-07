@@ -44,28 +44,25 @@ Nexus 的回答：**在你烧的时候，就把它变成资产。** 首次同步
 
 ![week](docs/screenshots/board-week.png)
 
-## 承认先例，划清差异
+## 一块看板，补齐生态空白
 
-**ccusage 开创了 Claude Code 用量统计**——它对 Claude Code 单一生态的统计深度（daily/monthly/blocks、成本计算成熟度）至今仍是同类标杆，值得每一个用量工具学习。
-
-Nexus 补上了它们没做的三件事：
+Nexus 补上了市面上工具没做的三件事：
 
 1. **中国系 Agent 全覆盖** —— ZCode / CodeBuddy（国内+国际版）/ DeepSeek Harness / WorkBuddy / Reasonix 等；其中 CodeBuddy 的用量维度，目前没有任何同类工具覆盖
 2. **快照式永久历史** —— 多数 Agent 本地仅留 30 天，Nexus 首次同步即全量历史照进自库，此后增量追加，永不丢失
 3. **桌面单文件形态** —— 双击 exe 即用，无后端、无浏览器、无部署
 
-### 与同类工具的诚实对比
+### 能力维度
 
-| 维度 | ccusage 及同类 CLI | 各 Agent 官方仪表盘 | **Nexus** |
+| 维度 | CLI 统计工具 | 各 Agent 官方仪表盘 | **Nexus** |
 | --- | --- | --- | --- |
-| Agent 覆盖 | Claude Code（深度） | 各家只看自己 | **10 个 Agent 统一看板**，中国系全覆盖 |
-| 历史留存 | 依赖 Agent 本地数据（30 天滚动，过时不候） | 云端留存，出过事故 | **快照式永久本地历史** |
-| 形态 | CLI / npm 包 | 网页 | **单 exe 桌面看板**（无后端无浏览器） |
+| Agent 覆盖 | 多聚焦单一生态 | 各家只看自己 | **10 个 Agent 统一看板**，中国系全覆盖 |
+| 历史留存 | 依赖 Agent 本地数据（30 天滚动，过时不候） | 云端留存 | **快照式永久本地历史** |
+| 形态 | 命令行 / 需部署 | 网页 | **单 exe 桌面看板**（无后端无浏览器） |
 | 成本视角 | API 牌价估算 | 平台账单 | **等效估算（明确标注）+ 官方账单对账** |
+| 额度视角 | — | 网页逐家查看 | **额度快照趋势**（如 Antigravity 周/5h 窗口） |
 | 隐私 | 本地运行 | 数据在云端 | **一切留在本机，只读模式** |
-| 语言 | 英文 | 各家不一 | **中文优先** |
-
-> ccusage 的历史数据可导入规划已在路线图中（生态兼容优先级最高的接口）。
+| 语言 | 多为英文 | 各家不一 | **中文优先** |
 
 ## 核心特性
 
@@ -87,7 +84,7 @@ Nexus 补上了它们没做的三件事：
 | ZCode | `~/.zcode/cli/db/db.sqlite`（请求级 token + 会话 + 工具调用，多实例感知） | 精确 |
 | Codex | `~/.codex/sessions/**/*.jsonl`（token_count 事件） | 精确 |
 | Claude Code | `~/.claude/projects/**/*.jsonl` | 精确（产生数据即生效） |
-| Antigravity | 会话元数据 + Antigravity Cockpit 代理日志（若启用） | 精确（启用后） |
+| Antigravity | 账号配额面板：周 / 5 小时窗口剩余额度与重置时间（官方数据，经本地管理器同步），并持续记录额度快照形成消耗趋势；会话元数据 | 额度精确（token 级官方不下发本地） |
 | CodeBuddy（国内版 / 国际版） | 本地 history 逐请求 usage + vscdb 会话关联 + 官方账单 | 精确 |
 | WorkBuddy | `~/.workbuddy-ai` 转录 + traces + 本地库 | 精确 |
 | Reasonix | stats 每日 jsonl | 精确 |
@@ -100,7 +97,7 @@ Nexus 补上了它们没做的三件事：
 
 ## 路线图
 
-- [ ] ccusage JSONL 历史导入（从竞品零成本迁移）
+- [ ] 通用 JSONL 历史导入（跨工具迁移）
 - [ ] macOS 支持（当前 Windows 优先，目标用户画像重合）
 - [ ] Demo 数据动图
 
