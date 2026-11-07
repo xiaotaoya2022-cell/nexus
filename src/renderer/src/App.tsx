@@ -12,7 +12,7 @@ import { SessionsPanel } from './components/SessionsPanel'
 import { SystemPill } from './components/SystemPill'
 import { AccountPanel } from './components/AccountPanel'
 import { WindowControls } from './components/WindowControls'
-import nexusLogo from './assets/nexus-logo.png'
+import nexusMark from './assets/nexus-mark.png'
 import { AnimatedNumber } from './components/RollingNumber'
 import {
   ChartCard,
@@ -254,13 +254,17 @@ export default function App(): JSX.Element {
         className="relative flex h-12 shrink-0 items-center gap-4 border-b border-border bg-panel px-4"
       >
         <div className="flex items-center gap-2">
-          <img
-            src={nexusLogo}
-            alt=""
+          {/* 标题栏品牌徽章：渐变底座 + 内侧描边 + 轻投影（同 ZCode 立体三件套），mark 双主题通吃 */}
+          <span
             aria-hidden
-            className="h-6 w-6 rounded-md"
-            draggable={false}
-          />
+            className="relative flex size-6 items-center justify-center overflow-hidden rounded-md
+              bg-[linear-gradient(180deg,#ffffff_0%,#eaeaec_100%)]
+              shadow-[0_1px_3px_rgba(0,0,0,0.22)]
+              before:pointer-events-none before:absolute before:inset-0 before:rounded-[inherit]
+              before:border before:border-black/10"
+          >
+            <img src={nexusMark} alt="" className="h-auto w-4" draggable={false} />
+          </span>
           <span className="text-ui-base font-medium">Nexus</span>
           <span className="text-ui-sm text-foreground-subtlest">本地算力监控</span>
         </div>
