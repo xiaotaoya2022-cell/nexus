@@ -18,6 +18,9 @@ import { OpencodeAdapter } from '../infrastructure/opencode'
 import { WorkBuddyAdapter } from '../infrastructure/workbuddy'
 import { MimoAdapter } from '../infrastructure/mimo'
 import { MuseAdapter } from '../infrastructure/muse'
+import { ClineAdapter, KiloCodeAdapter, RooCodeAdapter } from '../infrastructure/cline'
+import { GeminiCliAdapter } from '../infrastructure/gemini-cli'
+import { QwenAdapter } from '../infrastructure/qwen'
 
 export function createAdapters(store: StoreWriter): AgentAdapter[] {
   return [
@@ -31,7 +34,12 @@ export function createAdapters(store: StoreWriter): AgentAdapter[] {
     new OpencodeAdapter(store),
     new WorkBuddyAdapter(store),
     new MimoAdapter(store),
-    new MuseAdapter(store)
+    new MuseAdapter(store),
+    new ClineAdapter(store),
+    new RooCodeAdapter(store),
+    new KiloCodeAdapter(store),
+    new GeminiCliAdapter(store),
+    new QwenAdapter(store)
   ]
 }
 

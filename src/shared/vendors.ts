@@ -21,6 +21,9 @@ export const VENDORS: Record<string, VendorMeta> = {
   reasonix: { id: 'reasonix', label: 'Reasonix', color: '#F59E0B', initial: 'R' },
   xiaomi: { id: 'xiaomi', label: '小米', color: '#FF6900', initial: '米' },
   meta: { id: 'meta', label: 'Meta', color: '#0084FF', initial: 'M' },
+  cline: { id: 'cline', label: 'Cline', color: '#3B82F6', initial: 'C' },
+  roo: { id: 'roo', label: 'Roo Code', color: '#6366F1', initial: 'R' },
+  kilo: { id: 'kilo', label: 'Kilo Code', color: '#F97316', initial: 'K' },
   oss: { id: 'oss', label: '开源', color: '#2EA043', initial: '开' }
 }
 
@@ -39,7 +42,12 @@ export const AGENT_VENDOR: Record<string, string> = {
   'claude-code': 'anthropic',
   cursor: 'cursor',
   qoder: 'alibaba',
-  trae: 'bytedance'
+  trae: 'bytedance',
+  'gemini-cli': 'google',
+  qwen: 'alibaba',
+  cline: 'cline',
+  'roo-code': 'roo',
+  'kilo-code': 'kilo'
 }
 
 const FALLBACK: VendorMeta = { id: 'unknown', label: '其他', color: '#8B8D98', initial: '?' }

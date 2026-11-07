@@ -56,7 +56,7 @@ Nexus 补上了市面上工具没做的三件事：
 
 | 维度 | CLI 统计工具 | 各 Agent 官方仪表盘 | **Nexus** |
 | --- | --- | --- | --- |
-| Agent 覆盖 | 多聚焦单一生态 | 各家只看自己 | **11 个 Agent 统一看板**，中国系全覆盖 |
+| Agent 覆盖 | 多聚焦单一生态 | 各家只看自己 | **15 个 Agent 统一看板**，中国系全覆盖 |
 | 历史留存 | 依赖 Agent 本地数据（30 天滚动，过时不候） | 云端留存 | **快照式永久本地历史** |
 | 形态 | 命令行 / 需部署 | 网页 | **单 exe 桌面看板**（无后端无浏览器） |
 | 成本视角 | API 牌价估算 | 平台账单 | **等效估算（明确标注）+ 官方账单对账** |
@@ -93,6 +93,9 @@ Nexus 补上了市面上工具没做的三件事：
 | DSH（DeepSeek Harness） | 会话多帧 zstd 档案逐帧解压（含 per-model 细分与压缩上下文用量） | 精确 |
 | MiMo Code（小米） | `~/.local/share/mimocode/mimocode.db`（OpenCode 同构 SQLite，逐消息 token + 成本，兼容渠道分库） | 精确 |
 | Muse Code（Meta） | `~/.local/share/muse/sessions/**/session.jsonl`（逐请求 usage 事件，子集口径归一） | 精确 |
+| Cline / Roo Code / Kilo Code | VS Code `globalStorage` 逐任务 `ui_messages.json`（api_req_started 的 tokensIn/Out + 缓存读写） | 精确 |
+| Gemini CLI | `~/.gemini/tmp/*/chats/*.json`（逐消息 tokens，cached 子集归一） | 精确 |
+| Qwen Code（通义千问 CLI） | `~/.qwen/projects/*/chats/*.jsonl`（usageMetadata，语义同 Gemini） | 精确 |
 | DeepSeek 官方平台 | usage API 全历史分段滚动回溯 | 精确（与官网对账一致） |
 | Qoder / Trae / Cursor | 本地无结构化 token 数据（见调研报告） | 仅感知安装状态 |
 

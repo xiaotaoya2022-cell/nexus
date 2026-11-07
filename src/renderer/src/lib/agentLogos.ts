@@ -15,6 +15,9 @@ import workbuddySvg from '@renderer/assets/agent-logos/workbuddy.svg'
 import reasonixSvg from '@renderer/assets/agent-logos/reasonix.svg'
 import mimoPng from '@renderer/assets/agent-logos/mimo.png'
 import museSvg from '@renderer/assets/agent-logos/muse.svg'
+import clineSvg from '@renderer/assets/logos/cline.svg'
+import geminiSvg from '@renderer/assets/agent-logos/googlegemini.svg'
+import qwenSvg from '@renderer/assets/agent-logos/qwen.svg'
 
 export const AGENT_LOGOS: Record<string, string> = {
   zcode,
@@ -29,5 +32,8 @@ export const AGENT_LOGOS: Record<string, string> = {
   workbuddy: workbuddySvg,
   reasonix: reasonixSvg,
   mimo: mimoPng,
-  muse: museSvg
+  muse: museSvg,
+  cline: clineSvg,
+  'gemini-cli': geminiSvg,
+  qwen: qwenSvg
 }

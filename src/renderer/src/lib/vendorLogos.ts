@@ -13,6 +13,7 @@ import openai from '@renderer/assets/logos/openai.svg'
 import tencentqq from '@renderer/assets/logos/tencentqq.svg'
 import metaSvg from '@renderer/assets/logos/meta.svg'
 import xiaomiSvg from '@renderer/assets/logos/xiaomi.svg'
+import clineSvg from '@renderer/assets/logos/cline.svg'
 
 export const VENDOR_LOGOS: Record<string, string> = {
   deepseek,
@@ -24,6 +25,7 @@ export const VENDOR_LOGOS: Record<string, string> = {
   bytedance,
   cursor,
   meta: metaSvg,
+  cline: clineSvg,
   xiaomi: xiaomiSvg,
   // claude mark 给 anthropic 厂商组里 claude-code 行更贴切（同色系）
   'claude-code': claude
