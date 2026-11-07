@@ -10,7 +10,8 @@ import { relativeTime } from '@renderer/lib/format'
 import { AnimatedNumber } from './RollingNumber'
 import { VendorBadge } from './VendorBadge'
 import { AgentLogo } from './AgentLogo'
-import { STATUS_TEXT, StatusDot } from './ui'
+import { StatusDot, statusText } from './ui'
+import { t, useLang } from '../i18n'
 import { useUi } from '@renderer/store'
 
 type SidebarView = 'agent' | 'vendor'
@@ -32,6 +33,7 @@ export function AgentSidebar({
   agents: AgentInfo[]
   lastSyncAt: number | null
 }): JSX.Element {
+  useLang() // 语言切换时重渲染侧栏
   const agent = useUi((s) => s.agent)
   const setAgent = useUi((s) => s.setAgent)
   const [view, setView] = useState<SidebarView>(loadView)
@@ -84,7 +86,7 @@ export function AgentSidebar({
       key={a.id}
       type="button"
       onClick={() => setAgent(agent === a.id ? null : a.id)}
-      title={`${a.label} · ${STATUS_TEXT[a.status]}`}
+      title={`${a.label} · ${statusText(a.status)}`}
       className={`group flex w-full cursor-pointer items-center gap-2 rounded-lg pr-1 py-1 transition-colors duration-150 ${
         indent ? 'pl-5' : 'pl-2.5'
       } ${agent === a.id ? 'bg-selected' : 'hover:bg-surface-hover'}`}
@@ -107,14 +109,14 @@ export function AgentSidebar({
     <aside className="flex w-[264px] shrink-0 flex-col bg-background">
       <div className="flex items-center justify-between px-2.5 pb-1 pt-3">
         <span className="text-ui-xs font-medium text-foreground-subtlest">
-          {view === 'agent' ? `AGENTS · ${agents.length}` : `厂商 · ${new Set(agents.map((a) => vendorOf(a.id).id)).size}`}
+          {view === 'agent' ? `AGENTS · ${agents.length}` : `${t('sidebar.vendor')} · ${new Set(agents.map((a) => vendorOf(a.id).id)).size}`}
         </span>
         {/* 视图切换：按 Agent / 按厂商 */}
         <span className="flex h-5 items-center rounded-full bg-surface p-0.5">
           {(
             [
-              ['agent', 'Agent'],
-              ['vendor', '厂商']
+              ['agent', t('sidebar.agent')],
+              ['vendor', t('sidebar.vendor')]
             ] as Array<[SidebarView, string]>
           ).map(([v, label]) => (
             <button
@@ -135,20 +137,20 @@ export function AgentSidebar({
         <button
           type="button"
           onClick={() => setAgent(null)}
-          title={`全部 Agent · 今日合计 ${todayTotal} tokens`}
+          title={t('sidebar.todayTotal', { tokens: todayTotal })}
           className={`mb-1 flex w-full cursor-pointer items-center gap-2 rounded-lg border-b border-hairline pb-1.5 pl-2.5 pr-1 pt-1 transition-colors duration-150 ${
             agent === null ? 'bg-selected' : 'hover:bg-surface-hover'
           }`}
         >
           <span
-            title={anyActive ? '有 Agent 活跃' : '无活跃 Agent'}
+            title={anyActive ? t('sidebar.someActive') : t('sidebar.noneActive')}
             className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${
               anyActive ? 'bg-chart-1 nx-breathe' : 'bg-border'
             }`}
           />
           <span className="min-w-0 flex-1 text-left">
-            <span className="block truncate text-ui-base font-medium text-foreground">全部 Agent</span>
-            <span className="block truncate text-ui-xs text-foreground-subtlest">跨 Agent 汇总视图</span>
+            <span className="block truncate text-ui-base font-medium text-foreground">{t('sidebar.allAgents')}</span>
+            <span className="block truncate text-ui-xs text-foreground-subtlest">{t('sidebar.allAgents.sub')}</span>
           </span>
           <span className="font-mono text-ui-xs tabular-nums text-foreground-subtle">
             {todayTotal > 0 ? <AnimatedNumber num={todayTotal} toggleable={false} /> : ''}
@@ -165,7 +167,7 @@ export function AgentSidebar({
                   <button
                     type="button"
                     onClick={() => toggleGroup(g.vendor.id)}
-                    title={`${g.vendor.label} · ${g.items.length} 个 Agent · 今日合计 ${groupTotal} tokens`}
+                    title={t('sidebar.groupSummary', { vendor: g.vendor.label, n: g.items.length, tokens: groupTotal })}
                     className="group flex w-full cursor-pointer items-center gap-2 rounded-lg pl-2.5 pr-1 py-1 transition-colors duration-150 hover:bg-surface-hover"
                   >
                     <span
@@ -179,7 +181,7 @@ export function AgentSidebar({
                     <span className="min-w-0 flex-1 text-left">
                       <span className="block truncate text-ui-base font-medium text-foreground">{g.vendor.label}</span>
                       <span className="block truncate font-mono text-ui-xs text-foreground-subtlest">
-                        {g.items.length} 个 Agent · {latest ? relativeTime(latest) : '无记录'}
+                        {t('sidebar.groupShort', { n: g.items.length })} · {latest ? relativeTime(latest) : t('sidebar.nodata')}
                       </span>
                     </span>
                     <span className="font-mono text-ui-xs tabular-nums text-foreground-subtle">
@@ -193,7 +195,7 @@ export function AgentSidebar({
       </nav>
       <footer className="border-t border-hairline px-3 py-2 text-ui-xs text-foreground-subtlest">
         <span className="font-mono">
-          {lastSyncAt ? `上次同步 ${formatClock(lastSyncAt)}` : '尚未同步'}
+          {lastSyncAt ? t('sidebar.lastSync', { time: formatClock(lastSyncAt) }) : t('sidebar.neverSynced')}
         </span>
       </footer>
     </aside>

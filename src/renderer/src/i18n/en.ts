@@ -1,0 +1,212 @@
+// English language pack. Keys mirror zh-CN 1:1; add new keys to both.
+
+export const en: Record<string, string> = {
+  // ── Header ──
+  'app.subtitle': 'Local AI compute monitor',
+  'header.syncing': 'Syncing…',
+  'header.action.syncNow': 'Sync now',
+  'header.action.toggleLight': 'Switch to light theme',
+  'header.action.toggleDark': 'Switch to dark theme',
+  'header.action.exportPng': 'Export board as image',
+  'header.action.settings': 'Settings',
+
+  // ── Time ranges ──
+  'range.today': 'Today',
+  'range.yesterday': 'Yesterday',
+  'range.7d': '7 days',
+  'range.30d': '30 days',
+  'range.month': 'This month',
+  'range.year': 'This year',
+  'range.all': 'All',
+  'range.custom': 'Custom',
+
+  // ── Custom range popover ──
+  'custom.title': 'Custom time range',
+  'custom.start': 'Start',
+  'custom.end': 'End',
+  'custom.apply': 'Apply',
+  'custom.cancel': 'Cancel',
+  'custom.hint': 'Filters by actual event time (minute precision). Persists across restarts.',
+  'custom.toast.invalid': 'Invalid range: end time must be after start time',
+  'custom.toast.applied': 'Switched to custom range ({from} ~ {to})',
+
+  // ── Settings panel ──
+  'settings.title': 'Settings',
+  'settings.language': 'Language',
+  'settings.lang.zh': '中文',
+  'settings.lang.en': 'English',
+  'settings.retention': 'Data retention',
+  'settings.retention.forever': 'Keep forever (recommended)',
+  'settings.retention.days': 'Keep {n} days',
+  'settings.retention.hint': 'Cleanup only affects the Nexus store; never touches Agent data.',
+  'settings.retention.toast.days': 'Retention set to {n} days, effective after next sync',
+  'settings.retention.toast.forever': 'Data kept forever',
+  'settings.openDataDir': 'Open data directory',
+
+  'settings.dsh.title': 'DeepSeek Harness',
+  'settings.dsh.connected': 'Connected · port {port}',
+  'settings.dsh.sessionSuffix': ' · {n} sessions',
+  'settings.dsh.notDetected': 'No running DSH detected',
+  'settings.dsh.available': 'DSH available',
+  'settings.dsh.unavailable': 'DSH not running',
+  'settings.dsh.localSessions': 'Local sessions ({n}) · click to open folder:',
+  'settings.dsh.sessionTip': '{title}\n{n} requests · {tokens} tokens',
+  'settings.dsh.hint':
+    'Usage accumulates with each 60s incremental sync; sessions are also listed in the right "Sessions" column.',
+
+  'settings.remote.title': 'Remote access (LAN)',
+  'settings.remote.on': 'On',
+  'settings.remote.off': 'Off',
+  'settings.remote.action.off': 'Turn off',
+  'settings.remote.action.on': 'Turn on',
+  'settings.remote.qr': 'Generate pairing QR (valid 60s)',
+  'settings.remote.qrAlt': 'Pairing QR code',
+  'settings.remote.addressesHint': 'Pick a network, then paste the pairing string on your phone:',
+  'settings.remote.copied': 'Pairing string copied — paste it in the phone app settings',
+  'settings.remote.copy': 'Copy',
+  'settings.remote.crossNet':
+    'Across networks use a Tailscale/VPN address; the phone must be on the same Tailscale network.',
+  'settings.remote.devices': 'Paired devices',
+  'settings.remote.revoke': 'Revoke',
+
+  // ── Board ──
+  'empty.loading.title': 'Loading data',
+  'empty.loading.desc': 'First sync may take a few seconds.',
+  'empty.noData.title': 'No usage data yet',
+  'empty.noData.filtered':
+    'No Token records for "{agent}" in "{range}". Click "All Agents" in the sidebar to clear the filter, or pick another range.',
+  'empty.noData.plain':
+    'No Token records in "{range}". Switch the range in the top-right, or make sure the Agent has chats and wait for the next sync (60s).',
+
+  'kpi.tokens': 'Token usage',
+  'kpi.tokens.sub': '{tokens} tokens · {n} requests',
+  'kpi.sessions': 'Active sessions',
+  'kpi.sessions.sub': '{n} models involved',
+  'kpi.tools': 'Tool calls',
+  'kpi.tools.top': 'Top: {tool}',
+  'kpi.tools.none': 'No records in range',
+  'kpi.cost': 'Estimated cost',
+  'kpi.cost.sub': 'From public list prices, for reference only',
+
+  'chart.trend': 'Token trend',
+  'chart.trend.byModel': 'By model',
+  'chart.trend.byAgent': 'By agent',
+  'chart.trend.empty.title': 'No trend data',
+  'chart.trend.empty.desc': 'No Token usage in this range.',
+  'chart.types': 'Token types',
+  'chart.empty.title': 'No data',
+  'chart.empty.desc': 'No Token records in this range.',
+  'chart.agentShare': 'Agent share',
+  'chart.agentShare.filtered': 'Filtered: {agent} · Clear',
+  'chart.agentShare.drill': 'Click a slice to drill down',
+  'chart.modelRank': 'Model ranking · Tokens',
+  'chart.modelRank.empty.desc': 'No model calls in this range.',
+  'chart.heatmap': 'Activity heatmap · 7×24',
+  'chart.heatmap.cacheHit': 'Cache hit rate {pct}%',
+  'chart.toolRank': 'Tool call ranking',
+  'chart.toolRank.empty.title': 'No tool calls',
+  'chart.toolRank.empty.desc': 'This Agent has not reported tool calls yet.',
+  'chart.daily': 'Daily intensity · Tokens per day',
+
+  // ── Toast ──
+  'toast.export.done': 'Board exported: {path}',
+  'toast.export.failed': 'Export failed: {err}',
+  'toast.unknownError': 'Unknown error',
+
+  // ── Sidebar ──
+  'sidebar.allAgents': 'All Agents',
+  'sidebar.allAgents.sub': 'Cross-agent summary',
+  'sidebar.vendor': 'Vendor',
+  'sidebar.agent': 'Agent',
+  'sidebar.todayTotal': 'All Agents · today {tokens} tokens',
+  'sidebar.someActive': 'Agents active',
+  'sidebar.noneActive': 'No active agents',
+  'sidebar.groupSummary': '{vendor} · {n} agents · today {tokens} tokens',
+  'sidebar.nodata': 'No records',
+  'sidebar.groupShort': '{n} agents',
+  'sidebar.lastSync': 'Last sync {time}',
+  'sidebar.neverSynced': 'Never synced',
+
+  // ── Sessions ──
+  'sessions.title': 'Sessions',
+  'sessions.mask.off': 'Show sensitive info (titles/paths/tokens)',
+  'sessions.mask.on': 'Hide sensitive info (for screenshots)',
+  'sessions.empty.title': 'No sessions',
+  'sessions.empty.desc': 'No sessions in this range — try another time range.',
+  'sessions.count': '{n} sessions (first 120 shown)',
+  'sessions.tip': '{tokens} tokens / {n} requests',
+  'sessions.bizTrack': 'Business track',
+  'sessions.bizTrackMasked': 'Bus•ess',
+
+  // ── Accounts & quotas ──
+  'account.title': 'Accounts & quotas',
+  'account.refresh': 'Refresh now',
+  'account.fetchedAt': 'fetched {time}',
+  'account.officialSpend': 'Total spend (official)',
+  'account.balance': 'Balance',
+  'account.usageTotal': 'Usage total (all-time)',
+  'account.usageTotalRequests': '{n} requests',
+  'account.resetAt': 'Resets {time}',
+  'account.cloudBill': 'Last 30 days (cloud bill, 31-day window)',
+  'account.remaining': ' {n} left',
+  'account.login': 'Sign in {platform}',
+  'account.loggedIn': '{platform} · signed in',
+  'account.loggingIn': '{platform} signing in…',
+  'account.loginFailed': '{platform} sign-in failed: {err}',
+  'account.incognitoHint':
+    'Incognito: in-app isolated window, keeps browser sessions untouched, allows a second account',
+  'account.incognito': 'Incognito',
+  'account.logout': 'Sign out',
+  'account.emptyHint':
+    'No platform accounts found. Sign in with the buttons above (Cursor / Codex CLI local logins are imported automatically).',
+  'account.privacyNote':
+    'DeepSeek uses the official bill API (total spend / balance / all-history daily usage, 5-min refresh); CodeBuddy/WorkBuddy cloud bills keep only the last 31 days — earlier usage comes from local parsing. Credentials stay in memory only, never written to the Nexus store.',
+
+  // ── System pill ──
+  'system.title': 'System status',
+  'system.detail': 'System status (click for details)',
+  'system.memory': 'Memory',
+  'system.network': 'Network',
+  'system.netRate': 'Network rate',
+  'system.uptime': 'Up {h}h',
+  'system.collecting': 'Sampling…',
+  'system.waiting': 'Waiting for system samples…',
+  'system.collectingDetail': 'Sampling system metrics…',
+  'system.memoryPct': 'Memory {pct}%',
+
+  // ── Status ──
+  'status.running': 'Running',
+  'status.idle': 'Idle',
+  'status.offline': 'Offline',
+  'status.nodata': 'No data',
+  'status.donutHint': 'Pie + rays',
+
+  // ── Window controls ──
+  'win.minimize': 'Minimize',
+  'win.maximize': 'Maximize',
+  'win.restore': 'Restore',
+  'win.close': 'Close',
+
+  // ── Time relative / units ──
+  'time.noRecord': 'No record',
+  'time.justNow': 'just now',
+  'time.minutesAgo': '{n}m ago',
+  'time.hoursAgo': '{n}h ago',
+  'time.daysAgo': '{n}d ago',
+  'unit.times': 'calls',
+  'unit.trillion': 'T',
+  'unit.yi': 'B',
+  'unit.wan': 'K',
+  'tokenType.input': 'Input',
+  'tokenType.output': 'Output',
+  'tokenType.reasoning': 'Reasoning',
+  'tokenType.cacheRead': 'Cache read',
+  'tokenType.cacheWrite': 'Cache write',
+  'weekday.0': 'Mon',
+  'weekday.1': 'Tue',
+  'weekday.2': 'Wed',
+  'weekday.3': 'Thu',
+  'weekday.4': 'Fri',
+  'weekday.5': 'Sat',
+  'weekday.6': 'Sun'
+}

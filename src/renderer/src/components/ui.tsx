@@ -4,15 +4,15 @@
 import type { ReactNode } from 'react'
 import type { JSX } from 'react'
 import type { AgentStatus, RangeKey } from '@shared/types'
+import { t, useLang } from '../i18n'
 
-export const STATUS_TEXT: Record<AgentStatus, string> = {
-  active: '运行中',
-  idle: '空闲',
-  offline: '离线',
-  nodata: '无数据'
+/** 状态文案：渲染期走 t()（语言切换即时生效） */
+export function statusText(status: AgentStatus): string {
+  return t(`status.${status}`)
 }
 
 export function StatusDot({ status }: { status: AgentStatus }): JSX.Element {
+  useLang()
   const cls =
     status === 'active'
       ? 'bg-chart-1 nx-breathe'
@@ -21,7 +21,7 @@ export function StatusDot({ status }: { status: AgentStatus }): JSX.Element {
         : status === 'offline'
           ? 'bg-border'
           : 'bg-border opacity-60'
-  return <span title={STATUS_TEXT[status]} className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${cls}`} />
+  return <span title={statusText(status)} className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${cls}`} />
 }
 
 export function KpiCard({
@@ -213,11 +213,13 @@ export function ExportIcon(): JSX.Element {
   )
 }
 
-export const RANGE_OPTIONS: Array<{ key: RangeKey; label: string }> = [
-  { key: 'today', label: '今日' },
-  { key: '7d', label: '近 7 天' },
-  { key: '30d', label: '近 30 天' },
-  { key: 'month', label: '本月' },
-  { key: 'year', label: '今年' },
-  { key: 'all', label: '全部' }
+/** 时间范围选项（label 渲染期由 t(`range.${key}`) 生成，支持 i18n 与昨日） */
+export const RANGE_OPTIONS: Array<{ key: RangeKey }> = [
+  { key: 'today' },
+  { key: 'yesterday' },
+  { key: '7d' },
+  { key: '30d' },
+  { key: 'month' },
+  { key: 'year' },
+  { key: 'all' }
 ]

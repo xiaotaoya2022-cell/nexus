@@ -10,6 +10,7 @@ import { nexus } from '../lib/api'
 import { EChart } from '../charts/EChart'
 import { chartTokens, colorForIndex } from '../charts/options'
 import { compactNumber, formatTime, fullNumber } from '../lib/format'
+import { t, useLang } from '../i18n'
 import { IconButton, RefreshIcon } from './ui'
 
 function windowBar(label: string, used: number | null, remaining: number | null): JSX.Element {
@@ -21,7 +22,7 @@ function windowBar(label: string, used: number | null, remaining: number | null)
         <span className="text-ui-xs text-foreground-subtle">{label}</span>
         <span className="font-mono text-ui-xs tabular-nums text-foreground">
           {clamped != null ? `${clamped}%` : '—'}
-          {remaining != null && !Number.isNaN(remaining) ? ` 剩余 ${Math.round(remaining)}` : ''}
+          {remaining != null && !Number.isNaN(remaining) ? t('account.remaining', { n: Math.round(remaining) }) : ''}
         </span>
       </div>
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface">
@@ -112,14 +113,14 @@ function AccountRow({ view, onLogout }: { view: AccountQuotaView; onLogout: () =
           </span>
         )}
         <span className="flex-1" />
-        <span className="font-mono text-ui-xs text-foreground-subtlest">{formatTime(view.fetchedAt)} 采集</span>
+        <span className="font-mono text-ui-xs text-foreground-subtlest">{t('account.fetchedAt', { time: formatTime(view.fetchedAt) })}</span>
         {view.source === 'oauth' && (
           <button
             type="button"
             onClick={onLogout}
             className="rounded-md px-1.5 py-0.5 text-ui-xs text-foreground-subtle transition-colors duration-150 hover:bg-hover hover:text-foreground"
           >
-            登出
+            {t('account.logout')}
           </button>
         )}
       </div>
@@ -128,19 +129,19 @@ function AccountRow({ view, onLogout }: { view: AccountQuotaView; onLogout: () =
       {view.extra?.totalCostText != null && (
         <div className="grid grid-cols-3 gap-2 rounded-lg border border-hairline bg-surface px-3 py-2">
           <div className="flex flex-col gap-0.5">
-            <span className="text-ui-xs text-foreground-subtle">累计消费（官方）</span>
+            <span className="text-ui-xs text-foreground-subtle">{t('account.officialSpend')}</span>
             <span className="font-mono text-ui-base tabular-nums text-foreground">{view.extra.totalCostText}</span>
           </div>
           <div className="flex flex-col gap-0.5">
-            <span className="text-ui-xs text-foreground-subtle">余额</span>
+            <span className="text-ui-xs text-foreground-subtle">{t('account.balance')}</span>
             <span className="font-mono text-ui-base tabular-nums text-foreground">
               {view.extra.balanceText}
               {view.extra.usdBalanceText && view.extra.usdBalanceText !== '$0.00' ? ` + ${view.extra.usdBalanceText}` : ''}
             </span>
           </div>
           <div className="flex flex-col gap-0.5">
-            <span className="text-ui-xs text-foreground-subtle">用量合计（全历史）</span>
-            <span className="font-mono text-ui-base tabular-nums text-foreground" title={`${view.extra.usageTotalRequests ?? 0} 次请求`}>
+            <span className="text-ui-xs text-foreground-subtle">{t('account.usageTotal')}</span>
+            <span className="font-mono text-ui-base tabular-nums text-foreground" title={t('account.usageTotalRequests', { n: view.extra.usageTotalRequests ?? 0 })}>
               {compactNumber(Number(view.extra.usageTotalTokens ?? 0))} tk · {view.extra.usageTotalCostText ?? '—'}
             </span>
           </div>
@@ -156,7 +157,7 @@ function AccountRow({ view, onLogout }: { view: AccountQuotaView; onLogout: () =
               <div key={w.label}>
                 {windowBar(w.label, w.usedPercent, w.remainingPercent)}
                 {w.resetAt != null && (
-                  <div className="mt-0.5 text-ui-xs text-foreground-subtlest">重置 {formatTime(w.resetAt)}</div>
+                  <div className="mt-0.5 text-ui-xs text-foreground-subtlest">{t('account.resetAt', { time: formatTime(w.resetAt) })}</div>
                 )}
               </div>
             ))}
@@ -169,9 +170,9 @@ function AccountRow({ view, onLogout }: { view: AccountQuotaView; onLogout: () =
       {/* credits 口径（CodeBuddy/WorkBuddy 云端账单）：无官方 usage 块时单独给一行汇总 */}
       {hasOfficialUsage !== true && creditRequests > 0 && (
         <div className="flex items-baseline justify-between rounded-lg border border-hairline bg-surface px-3 py-1.5">
-          <span className="text-ui-xs text-foreground-subtle">近 30 天消耗（云端账单，仅存 31 天）</span>
+          <span className="text-ui-xs text-foreground-subtle">{t('account.cloudBill')}</span>
           <span className="font-mono text-ui-sm tabular-nums text-foreground">
-            {creditRequests} 次请求 · {creditSum.toFixed(2)} credits
+            {t('account.usageTotalRequests', { n: creditRequests })} · {creditSum.toFixed(2)} credits
           </span>
         </div>
       )}
@@ -181,6 +182,7 @@ function AccountRow({ view, onLogout }: { view: AccountQuotaView; onLogout: () =
 }
 
 export function AccountPanel(): JSX.Element {
+  useLang() // 语言切换时重渲染
   const [open, setOpen] = useState(false)
   const [platforms, setPlatforms] = useState<PlatformMetaView[]>([])
   const [accounts, setAccounts] = useState<AccountQuotaView[]>([])
@@ -216,7 +218,7 @@ export function AccountPanel(): JSX.Element {
       await nexus.quotaLogin(platformId, mode)
       await load()
     } catch (err) {
-      setError(`${label} 登录失败：${err instanceof Error ? err.message : String(err)}`)
+      setError(t('account.loginFailed', { platform: label, err: err instanceof Error ? err.message : String(err) }))
     } finally {
       setLoggingIn(null)
     }
@@ -224,7 +226,7 @@ export function AccountPanel(): JSX.Element {
 
   return (
     <div className="relative">
-      <IconButton title="账号与配额" onClick={() => setOpen((v) => !v)}>
+      <IconButton title={t('account.title')} onClick={() => setOpen((v) => !v)}>
         <WalletIcon />
       </IconButton>
       {open && (
@@ -232,8 +234,8 @@ export function AccountPanel(): JSX.Element {
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
           <div className="nx-fade-in absolute right-0 top-9 z-20 w-[30rem] rounded-xl border border-border bg-card p-4">
             <div className="mb-2 flex items-center justify-between">
-              <span className="text-ui-base font-medium">账号与配额</span>
-              <IconButton title="立即刷新" onClick={() => void refresh()} spinning={refreshing}>
+              <span className="text-ui-base font-medium">{t('account.title')}</span>
+              <IconButton title={t('account.refresh')} onClick={() => void refresh()} spinning={refreshing}>
                 <RefreshIcon />
               </IconButton>
             </div>
@@ -254,16 +256,16 @@ export function AccountPanel(): JSX.Element {
                           : 'bg-secondary text-foreground hover:bg-surface-hover'
                       }`}
                     >
-                      {loggingIn === p.id ? `${p.label} 登录中…` : logged ? `${p.label} · 已登录` : `登录 ${p.label}`}
+                      {loggingIn === p.id ? t('account.loggingIn', { platform: p.label }) : logged ? t('account.loggedIn', { platform: p.label }) : t('account.login', { platform: p.label })}
                     </button>
                     <button
                       type="button"
                       disabled={loggingIn !== null}
-                      title="无痕登录：应用内独立窗口，不影响浏览器已登录态，可登录第二个账号"
+                      title={t('account.incognitoHint')}
                       onClick={() => void login(p.id, p.label, 'incognito')}
                       className="h-6 border-l border-border bg-surface px-1.5 text-ui-xs text-foreground-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-foreground"
                     >
-                      无痕
+                      {t('account.incognito')}
                     </button>
                   </span>
                 ) : null
@@ -273,7 +275,7 @@ export function AccountPanel(): JSX.Element {
 
             {accounts.length === 0 ? (
               <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-ui-sm text-foreground-subtle">
-                尚未发现平台账号。点击上方平台按钮登录（Cursor / Codex CLI 本机登录态会自动导入）。
+                {t('account.emptyHint')}
               </div>
             ) : (
               <div className="flex max-h-[26rem] flex-col divide-y divide-hairline overflow-y-auto">
@@ -289,7 +291,7 @@ export function AccountPanel(): JSX.Element {
               </div>
             )}
             <div className="mt-2 text-ui-xs text-foreground-subtlest">
-              DeepSeek 为官方账单口径（累计消费/余额/全历史逐日用量，每 5 分钟增量刷新）；CodeBuddy/WorkBuddy 云端账单仅存近 31 天，更早用量以本地解析为准。凭据仅在内存使用，不写入 Nexus 数据库。
+              {t('account.privacyNote')}
             </div>
           </div>
         </>

@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react'
 import type { JSX } from 'react'
 import { nexus } from '../lib/api'
+import { t, useLang } from '../i18n'
 
 const BTN = 'flex h-12 w-12 items-center justify-center text-foreground-subtle transition-colors duration-150'
 
@@ -41,6 +42,7 @@ function CloseIcon(): JSX.Element {
 }
 
 export function WindowControls(): JSX.Element {
+  useLang() // 语言切换时重渲染
   const [maximized, setMaximized] = useState(false)
 
   useEffect(() => {
@@ -52,8 +54,8 @@ export function WindowControls(): JSX.Element {
     <div className="flex shrink-0 items-stretch" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
       <button
         type="button"
-        title="最小化"
-        aria-label="最小化"
+        title={t('win.minimize')}
+        aria-label={t('win.minimize')}
         onClick={() => void nexus.minimizeWindow()}
         className={`${BTN} hover:bg-hover hover:text-foreground`}
       >
@@ -61,8 +63,8 @@ export function WindowControls(): JSX.Element {
       </button>
       <button
         type="button"
-        title={maximized ? '向下还原' : '最大化'}
-        aria-label={maximized ? '向下还原' : '最大化'}
+        title={maximized ? t('win.restore') : t('win.maximize')}
+        aria-label={maximized ? t('win.restore') : t('win.maximize')}
         onClick={() => void nexus.toggleMaximizeWindow()}
         className={`${BTN} hover:bg-hover hover:text-foreground`}
       >
@@ -70,8 +72,8 @@ export function WindowControls(): JSX.Element {
       </button>
       <button
         type="button"
-        title="关闭"
-        aria-label="关闭"
+        title={t('win.close')}
+        aria-label={t('win.close')}
         onClick={() => void nexus.closeWindow()}
         className={`${BTN} hover:bg-destructive hover:text-white`}
       >

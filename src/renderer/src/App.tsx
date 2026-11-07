@@ -13,6 +13,8 @@ import { SystemPill } from './components/SystemPill'
 import { AccountPanel } from './components/AccountPanel'
 import { WindowControls } from './components/WindowControls'
 import nexusMark from './assets/nexus-mark.png'
+import { getLang, setLang, t, useLang } from './i18n'
+import type { Lang } from './i18n'
 import { AnimatedNumber } from './components/RollingNumber'
 import {
   ChartCard,
@@ -50,6 +52,8 @@ export default function App(): JSX.Element {
   const range = useUi((s) => s.range)
   const agent = useUi((s) => s.agent)
   const theme = useUi((s) => s.theme)
+  // 语言订阅：切换语言时触发 App 重渲染（各子组件自行 useLang）
+  useLang()
   const setTheme = useUi((s) => s.setTheme)
   const setAgent = useUi((s) => s.setAgent)
   const sync = useUi((s) => s.sync)
@@ -93,14 +97,19 @@ export default function App(): JSX.Element {
     const start = new Date(customFrom).getTime()
     const end = new Date(customTo).getTime()
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
-      setToast('自定义范围无效：结束时间需晚于开始时间')
+      setToast(t('custom.toast.invalid'))
       return
     }
     const saved = await nexus.setCustomRange(start, end)
     useUi.getState().setCustomRange(saved)
     useUi.getState().setRange('custom')
     setCustomPickerOpen(false)
-    setToast(`已切换到自定义范围（${new Date(start).toLocaleDateString()} ~ ${new Date(end).toLocaleDateString()}）`)
+    setToast(
+      t('custom.toast.applied', {
+        from: new Date(start).toLocaleDateString(),
+        to: new Date(end).toLocaleDateString()
+      })
+    )
   }
 
   // 主题 class 必须在子组件读取 CSS 变量（chartTokens）之前生效：
@@ -140,8 +149,8 @@ export default function App(): JSX.Element {
 
   const handleExport = async (): Promise<void> => {
     const r = await nexus.exportBoard()
-    if (r.ok && r.path) setToast(`看板已导出：${r.path}`)
-    else if (!r.ok && !r.canceled) setToast(`导出失败：${r.error ?? '未知错误'}`)
+    if (r.ok && r.path) setToast(t('toast.export.done', { path: r.path }))
+    else if (!r.ok && !r.canceled) setToast(t('toast.export.failed', { err: r.error ?? t('toast.unknownError') }))
   }
 
   const toggleTheme = async (): Promise<void> => {
@@ -165,7 +174,7 @@ export default function App(): JSX.Element {
   const changeRetention = async (days: number): Promise<void> => {
     const v = await nexus.setRetentionDays(days)
     setRetention(v)
-    setToast(days > 0 ? `数据保留 ${days} 天，下轮同步后生效` : '数据永久保留')
+    setToast(days > 0 ? t('settings.retention.toast.days', { n: days }) : t('settings.retention.toast.forever'))
   }
 
   const totalTokens = data?.overview.totals.total ?? 0
@@ -219,7 +228,7 @@ export default function App(): JSX.Element {
 
   const toolBarOpt = useMemo<EChartsOption | null>(() => {
     if (!data || data.tools.length === 0) return null
-    return rankBarOption(data.tools, tokens, false, '次')
+    return rankBarOption(data.tools, tokens, false, t('unit.times'))
   }, [data, tokens])
 
   const heatmapOpt = useMemo<EChartsOption | null>(() => {
@@ -259,22 +268,24 @@ export default function App(): JSX.Element {
             aria-hidden
             className="relative flex size-6 items-center justify-center overflow-hidden rounded-md
               bg-[linear-gradient(180deg,#ffffff_0%,#eaeaec_100%)]
-              shadow-[0_1px_2px_rgba(0,0,0,0.08)]
               before:pointer-events-none before:absolute before:inset-0 before:rounded-[inherit]
               before:border before:border-black/10"
           >
             <img src={nexusMark} alt="" className="h-auto w-4" draggable={false} />
           </span>
           <span className="text-ui-base font-medium">Nexus</span>
-          <span className="text-ui-sm text-foreground-subtlest">本地算力监控</span>
+          <span className="text-ui-sm text-foreground-subtlest">{t('app.subtitle')}</span>
         </div>
         <div className="flex-1" style={{WebkitAppRegion: "no-drag"} as React.CSSProperties} />
         {sync.phase === 'running' && (
-          <span className="text-ui-xs text-foreground-subtle">同步中…</span>
+          <span className="text-ui-xs text-foreground-subtle">{t('header.syncing')}</span>
         )}
         <div className="relative" style={{WebkitAppRegion: "no-drag"} as React.CSSProperties}>
           <PillSwitcher
-            options={[...RANGE_OPTIONS, { key: 'custom' as RangeKey, label: '自定义' }]}
+            options={[
+              ...RANGE_OPTIONS.map((o) => ({ ...o, label: t(`range.${o.key}`) })),
+              { key: 'custom' as RangeKey, label: t('range.custom') }
+            ]}
             value={range}
             onChange={(r: RangeKey) => {
               if (r === 'custom') {
@@ -290,15 +301,15 @@ export default function App(): JSX.Element {
             <>
               <div className="fixed inset-0 z-10" onClick={() => setCustomPickerOpen(false)} />
               <div className="nx-fade-in absolute right-0 top-9 z-20 w-80 rounded-xl border border-border bg-card p-4">
-                <div className="mb-3 text-ui-base font-medium">自定义时间范围</div>
-                <label className="mb-1 block text-ui-xs text-foreground-subtle">开始</label>
+                <div className="mb-3 text-ui-base font-medium">{t('custom.title')}</div>
+                <label className="mb-1 block text-ui-xs text-foreground-subtle">{t('custom.start')}</label>
                 <input
                   type="datetime-local"
                   value={customFrom}
                   onChange={(e) => setCustomFrom(e.target.value)}
                   className="h-8 w-full rounded-lg border border-border bg-card px-2 font-mono text-ui-sm text-foreground"
                 />
-                <label className="mb-1 mt-3 block text-ui-xs text-foreground-subtle">结束</label>
+                <label className="mb-1 mt-3 block text-ui-xs text-foreground-subtle">{t('custom.end')}</label>
                 <input
                   type="datetime-local"
                   value={customTo}
@@ -311,35 +322,33 @@ export default function App(): JSX.Element {
                     onClick={() => void applyCustomRange()}
                     className="h-8 flex-1 rounded-lg bg-chart-1 px-2 text-ui-sm font-medium text-white transition-colors duration-150 hover:opacity-90"
                   >
-                    应用
+                    {t('custom.apply')}
                   </button>
                   <button
                     type="button"
                     onClick={() => setCustomPickerOpen(false)}
                     className="h-8 flex-1 rounded-lg bg-secondary px-2 text-ui-sm text-foreground transition-colors duration-150 hover:bg-surface-hover"
                   >
-                    取消
+                    {t('custom.cancel')}
                   </button>
                 </div>
-                <div className="mt-2 text-ui-xs text-foreground-subtlest">
-                  按数据的实际发生时间过滤（精确到分钟），设置重启保持。
-                </div>
+                <div className="mt-2 text-ui-xs text-foreground-subtlest">{t('custom.hint')}</div>
               </div>
             </>
           )}
         </div>
         <SystemPill />
         <AccountPanel />
-        <IconButton style={{WebkitAppRegion: "no-drag"} as React.CSSProperties} title="立即同步" onClick={() => void nexus.syncNow()} spinning={sync.phase === 'running'}>
+        <IconButton style={{WebkitAppRegion: "no-drag"} as React.CSSProperties} title={t('header.action.syncNow')} onClick={() => void nexus.syncNow()} spinning={sync.phase === 'running'}>
           <RefreshIcon />
         </IconButton>
-        <IconButton title={theme === 'dark' ? '切换亮色' : '切换暗色'} onClick={() => void toggleTheme()}>
+        <IconButton title={theme === 'dark' ? t('header.action.toggleLight') : t('header.action.toggleDark')} onClick={() => void toggleTheme()}>
           {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
         </IconButton>
-        <IconButton style={{WebkitAppRegion: "no-drag"} as React.CSSProperties} title="导出看板为图片" onClick={() => void handleExport()}>
+        <IconButton style={{WebkitAppRegion: "no-drag"} as React.CSSProperties} title={t('header.action.exportPng')} onClick={() => void handleExport()}>
           <ExportIcon />
         </IconButton>
-        <IconButton style={{WebkitAppRegion: "no-drag"} as React.CSSProperties} title="设置" onClick={() => void openSettings()}>
+        <IconButton style={{WebkitAppRegion: "no-drag"} as React.CSSProperties} title={t('header.action.settings')} onClick={() => void openSettings()}>
           <GearIcon />
         </IconButton>
         <WindowControls />
@@ -350,20 +359,32 @@ export default function App(): JSX.Element {
               className="nx-fade-in absolute right-3 top-12 z-20 w-72 rounded-xl border border-border bg-card p-4"
               role="dialog"
             >
-            <div className="mb-3 text-ui-base font-medium">设置</div>
-            <label className="mb-1 block text-ui-xs text-foreground-subtle">数据保留</label>
+            <div className="mb-3 text-ui-base font-medium">{t('settings.title')}</div>
+            <label className="mb-1 block text-ui-xs text-foreground-subtle">{t('settings.language')}</label>
+            <select
+              value={getLang()}
+              onChange={(e) => {
+                setLang(e.target.value as Lang)
+                void nexus.setTheme(theme) // 触发一次设置持久化同步（语言本身走 localStorage）
+              }}
+              className="h-7 w-full rounded-lg border border-border bg-card px-2 text-ui-base text-foreground"
+            >
+              <option value="zh-CN">{t('settings.lang.zh')}</option>
+              <option value="en">{t('settings.lang.en')}</option>
+            </select>
+            <label className="mb-1 mt-3 block text-ui-xs text-foreground-subtle">{t('settings.retention')}</label>
             <select
               value={retention}
               onChange={(e) => void changeRetention(Number(e.target.value))}
               className="h-7 w-full rounded-lg border border-border bg-card px-2 text-ui-base text-foreground"
             >
-              <option value={0}>永久保留（推荐）</option>
-              <option value={90}>保留 90 天</option>
-              <option value={180}>保留 180 天</option>
-              <option value={365}>保留 365 天</option>
+              <option value={0}>{t('settings.retention.forever')}</option>
+              <option value={90}>{t('settings.retention.days', { n: 90 })}</option>
+              <option value={180}>{t('settings.retention.days', { n: 180 })}</option>
+              <option value={365}>{t('settings.retention.days', { n: 365 })}</option>
             </select>
             <div className="mt-1 text-ui-xs text-foreground-subtlest">
-              清理仅作用于 Nexus 自有库，不改任何 Agent 数据。
+              {t('settings.retention.hint')}
             </div>
             <button
               type="button"
@@ -372,20 +393,20 @@ export default function App(): JSX.Element {
               }}
               className="mt-3 h-7 w-full rounded-lg bg-secondary px-2 text-ui-base text-foreground transition-colors duration-150 hover:bg-surface-hover"
             >
-              打开数据目录
+              {t('settings.openDataDir')}
             </button>
 
             <div className="my-3 h-px bg-hairline" />
-            <div className="mb-1 text-ui-xs text-foreground-subtle">DeepSeek Harness</div>
+            <div className="mb-1 text-ui-xs text-foreground-subtle">{t('settings.dsh.title')}</div>
             <div className="flex items-center justify-between gap-2">
               <span className="min-w-0 truncate text-ui-sm text-foreground">
                 {dshStatus?.available
-                  ? `已连接 · 端口 ${dshStatus.port}${dshStatus.sessionCount ? ` · ${dshStatus.sessionCount} 会话` : ''}`
-                  : '未检测到运行中的 DSH'}
+                  ? `${t('settings.dsh.connected', { port: dshStatus.port })}${dshStatus.sessionCount ? t('settings.dsh.sessionSuffix', { n: dshStatus.sessionCount }) : ''}`
+                  : t('settings.dsh.notDetected')}
               </span>
               <span
                 className={`h-1.5 w-1.5 shrink-0 rounded-full ${dshStatus?.available ? 'bg-success' : 'bg-border'}`}
-                title={dshStatus?.available ? 'DSH 可用' : 'DSH 未运行'}
+                title={dshStatus?.available ? t('settings.dsh.available') : t('settings.dsh.unavailable')}
               />
             </div>
             {dshStatus?.detail && (
@@ -394,13 +415,13 @@ export default function App(): JSX.Element {
             {dshSessions.length > 0 && (
               <div className="mt-2 flex flex-col gap-0.5">
                 <div className="text-ui-xs text-foreground-subtle">
-                  本地会话（{dshSessions.length}）· 点击打开所在目录：
+                  {t('settings.dsh.localSessions', { n: dshSessions.length })}
                 </div>
                 {dshSessions.slice(0, 8).map((sess) => (
                   <button
                     key={sess.sessionId}
                     type="button"
-                    title={`${sess.title ?? sess.projectDir ?? sess.sessionId}\n${sess.requests} 次请求 · ${fullNumber(sess.tokens)} tokens${sess.projectDir ? `\n${sess.projectDir}` : ''}`}
+                    title={`${t('settings.dsh.sessionTip', { title: sess.title ?? sess.projectDir ?? sess.sessionId, n: sess.requests, tokens: fullNumber(sess.tokens) })}${sess.projectDir ? `\n${sess.projectDir}` : ''}`}
                     onClick={() => {
                       if (!sess.projectDir) return
                       void nexus.openPath(sess.projectDir).catch(() => undefined)
@@ -416,15 +437,15 @@ export default function App(): JSX.Element {
                   </button>
                 ))}
                 <div className="text-ui-xs text-foreground-subtlest">
-                  消耗随每 60 秒增量同步累计；会话明细也可在右侧「会话明细」栏查看。
+                  {t('settings.dsh.hint')}
                 </div>
               </div>
             )}
 
             <div className="my-3 h-px bg-hairline" />
-            <div className="mb-1 text-ui-xs text-foreground-subtle">远程访问（局域网）</div>
+            <div className="mb-1 text-ui-xs text-foreground-subtle">{t('settings.remote.title')}</div>
             <div className="flex items-center justify-between">
-              <span className="text-ui-sm text-foreground">{remoteOn ? '已开启' : '已关闭'}</span>
+              <span className="text-ui-sm text-foreground">{remoteOn ? t('settings.remote.on') : t('settings.remote.off')}</span>
               <button
                 type="button"
                 onClick={() => {
@@ -437,7 +458,7 @@ export default function App(): JSX.Element {
                 }}
                 className="h-7 rounded-lg bg-secondary px-2 text-ui-sm text-foreground transition-colors duration-150 hover:bg-surface-hover"
               >
-                {remoteOn ? '关闭' : '开启'}
+                {remoteOn ? t('settings.remote.action.off') : t('settings.remote.action.on')}
               </button>
             </div>
             {remoteOn && (
@@ -449,11 +470,11 @@ export default function App(): JSX.Element {
                   }}
                   className="mt-2 h-7 w-full rounded-lg bg-secondary px-2 text-ui-sm text-foreground transition-colors duration-150 hover:bg-surface-hover"
                 >
-                  生成配对二维码（60 秒有效）
+                  {t('settings.remote.qr')}
                 </button>
                 {pairing?.qrDataUrl && (
                   <div className="mt-2 flex flex-col items-center gap-1">
-                    <img src={pairing.qrDataUrl} alt="配对二维码" className="h-40 w-40 rounded-lg border border-border" />
+                    <img src={pairing.qrDataUrl} alt={t('settings.remote.qrAlt')} className="h-40 w-40 rounded-lg border border-border" />
                     <span className="font-mono text-ui-sm tabular-nums text-foreground-subtle">
                       PIN {pairing.pin}
                     </span>
@@ -461,7 +482,7 @@ export default function App(): JSX.Element {
                 )}
                 {pairing && pairing.addresses.length > 0 && (
                   <div className="mt-2 flex flex-col gap-1">
-                    <div className="text-ui-xs text-foreground-subtle">按网络选地址，复制配对串到手机粘贴：</div>
+                    <div className="text-ui-xs text-foreground-subtle">{t('settings.remote.addressesHint')}</div>
                     {pairing.addresses.map((a) => (
                       <div key={a.host} className="flex items-center gap-2">
                         <span className="min-w-0 flex-1 truncate text-ui-xs text-foreground-subtlest" title={a.uri}>
@@ -470,22 +491,22 @@ export default function App(): JSX.Element {
                         <button
                           type="button"
                           onClick={() => {
-                            void navigator.clipboard.writeText(a.uri).then(() => setToast('配对串已复制，粘贴到手机端设置页'))
+                            void navigator.clipboard.writeText(a.uri).then(() => setToast(t('settings.remote.copied')))
                           }}
                           className="shrink-0 rounded-md px-1.5 py-0.5 text-ui-xs text-foreground-subtle transition-colors duration-150 hover:bg-hover hover:text-foreground"
                         >
-                          复制
+                          {t('settings.remote.copy')}
                         </button>
                       </div>
                     ))}
                     <div className="text-ui-xs text-foreground-subtlest">
-                      跨网（不同 Wi-Fi/流量）请用 Tailscale/虚拟网 地址；手机需已登录同一 Tailscale 网络。
+                      {t('settings.remote.crossNet')}
                     </div>
                   </div>
                 )}
                 {remoteStatus && remoteStatus.devices.length > 0 && (
                   <div className="mt-2">
-                    <div className="mb-1 text-ui-xs text-foreground-subtle">已配对设备</div>
+                    <div className="mb-1 text-ui-xs text-foreground-subtle">{t('settings.remote.devices')}</div>
                     {remoteStatus.devices.map((d) => (
                       <div key={d.deviceId} className="flex items-center justify-between py-0.5">
                         <span className="truncate text-ui-caption text-foreground" title={d.deviceId}>
@@ -500,7 +521,7 @@ export default function App(): JSX.Element {
                           }}
                           className="rounded-md px-1.5 py-0.5 text-ui-xs text-destructive transition-colors duration-150 hover:bg-destructive-surface"
                         >
-                          撤销
+                          {t('settings.remote.revoke')}
                         </button>
                       </div>
                     ))}
@@ -522,14 +543,17 @@ export default function App(): JSX.Element {
           className="min-w-0 flex-1 space-y-4 overflow-y-auto rounded-xl border border-hairline bg-panel p-4 transition-opacity duration-150"
         >
           {!data ? (
-            <EmptyState title="正在加载数据" description="首次同步可能需要几秒钟。" />
+            <EmptyState title={t('empty.loading.title')} description={t('empty.loading.desc')} />
           ) : totalTokens === 0 && data.sessions.length === 0 ? (
             <EmptyState
-              title="暂无用量数据"
+              title={t('empty.noData.title')}
               description={
                 agent
-                  ? `当前筛选「${agentLabels.get(agent) ?? agent}」+ 范围「${RANGE_OPTIONS.find((o) => o.key === range)?.label ?? range}」内没有 Token 记录。点击侧栏「全部 Agent」取消筛选，或换一个时间范围。`
-                  : `当前范围「${RANGE_OPTIONS.find((o) => o.key === range)?.label ?? range}」内未发现 Token 记录。切换右上角时间范围，或确认对应 Agent 已产生对话后等待下一轮同步（60 秒）。`
+                  ? t('empty.noData.filtered', {
+                      agent: agentLabels.get(agent) ?? agent,
+                      range: t(`range.${range}`)
+                    })
+                  : t('empty.noData.plain', { range: t(`range.${range}`) })
               }
             />
           ) : (
@@ -537,22 +561,22 @@ export default function App(): JSX.Element {
               {/* KPI 矩阵 */}
               <div className="grid grid-cols-2 gap-4 2xl:grid-cols-4">
                 <KpiCard
-                  label="Token 消耗"
+                  label={t('kpi.tokens')}
                   value={<AnimatedNumber num={totalTokens} />}
-                  sub={`${fullNumber(totalTokens)} tokens · ${data.overview.totals.requests} 次请求`}
+                  sub={t('kpi.tokens.sub', { tokens: fullNumber(totalTokens), n: data.overview.totals.requests })}
                 />
                 <KpiCard
-                  label="活跃会话"
+                  label={t('kpi.sessions')}
                   value={<AnimatedNumber num={data.overview.sessionCount} />}
-                  sub={`涉及 ${data.overview.activeModels} 个模型`}
+                  sub={t('kpi.sessions.sub', { n: data.overview.activeModels })}
                 />
                 <KpiCard
-                  label="工具调用"
+                  label={t('kpi.tools')}
                   value={<AnimatedNumber num={data.overview.toolCallCount} />}
-                  sub={data.tools.length ? `最高频 ${data.tools[0].tool}` : '范围内无记录'}
+                  sub={data.tools.length ? t('kpi.tools.top', { tool: data.tools[0].tool }) : t('kpi.tools.none')}
                 />
                 <KpiCard
-                  label="估算成本"
+                  label={t('kpi.cost')}
                   value={
                     <AnimatedNumber
                       num={data.overview.totals.estimatedCostUsd}
@@ -560,20 +584,20 @@ export default function App(): JSX.Element {
                       fullFormat={(n) => `$${n.toFixed(4)}`}
                     />
                   }
-                  sub="按公开牌价折算，仅供参考"
+                  sub={t('kpi.cost.sub')}
                 />
               </div>
 
               {/* 趋势 + Token 类型 */}
               <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
                 <ChartCard
-                  title="Token 趋势"
+                  title={t('chart.trend')}
                   className="xl:col-span-2"
                   actions={
                     <PillSwitcher
                       options={[
-                        { key: 'model', label: '按模型' },
-                        { key: 'agent', label: '按 Agent' }
+                        { key: 'model', label: t('chart.trend.byModel') },
+                        { key: 'agent', label: t('chart.trend.byAgent') }
                       ]}
                       value={trendGroup}
                       onChange={setTrendGroup}
@@ -584,10 +608,10 @@ export default function App(): JSX.Element {
                   {trendOpt != null ? (
                     <EChart option={trendOpt} className="h-60 w-full" />
                   ) : (
-                    <EmptyState title="暂无趋势数据" description="当前范围内没有 Token 消耗记录。" />
+                    <EmptyState title={t('chart.trend.empty.title')} description={t('chart.trend.empty.desc')} />
                   )}
                 </ChartCard>
-                <ChartCard title="Token 类型">
+                <ChartCard title={t('chart.types')}>
                   {typeOpt != null ? (
                     <>
                       <EChart option={typeOpt} className="h-44 w-full" />
@@ -597,14 +621,14 @@ export default function App(): JSX.Element {
                           .map((b, i) => (
                             <LegendItem
                               key={b.key}
-                              label={`${b.label} ${compactNumber(b.tokens)}`}
-                              color={colorForIndex(tokens, TOKEN_TYPE_COLORS.find((t) => t.key === b.key)?.colorVarIndex ?? i)}
+                              label={`${t(`tokenType.${b.key}`)} ${compactNumber(b.tokens)}`}
+                              color={colorForIndex(tokens, TOKEN_TYPE_COLORS.find((tt) => tt.key === b.key)?.colorVarIndex ?? i)}
                             />
                           ))}
                       </div>
                     </>
                   ) : (
-                    <EmptyState title="暂无数据" description="当前范围内没有 Token 记录。" />
+                    <EmptyState title={t('chart.empty.title')} description={t('chart.empty.desc')} />
                   )}
                 </ChartCard>
               </div>
@@ -612,7 +636,7 @@ export default function App(): JSX.Element {
               {/* Agent 占比 + 模型排行 */}
               <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
                 <ChartCard
-                  title="Agent 占比"
+                  title={t('chart.agentShare')}
                   actions={
                     agent ? (
                       <button
@@ -620,10 +644,10 @@ export default function App(): JSX.Element {
                         onClick={() => setAgent(null)}
                         className="rounded-lg px-2 py-0.5 text-ui-xs text-foreground-subtle transition-colors duration-150 hover:bg-hover hover:text-foreground"
                       >
-                        已筛选 {agentLabels.get(agent) ?? agent} · 取消
+                        {t('chart.agentShare.filtered', { agent: agentLabels.get(agent) ?? agent })}
                       </button>
                     ) : (
-                      <span className="text-ui-xs text-foreground-subtlest">点击扇区可下钻</span>
+                      <span className="text-ui-xs text-foreground-subtlest">{t('chart.agentShare.drill')}</span>
                     )
                   }
                 >
@@ -645,15 +669,15 @@ export default function App(): JSX.Element {
                       </div>
                     </>
                   ) : (
-                    <EmptyState title="暂无数据" description="当前范围内没有 Token 记录。" />
+                    <EmptyState title={t('chart.empty.title')} description={t('chart.empty.desc')} />
                   )}
                 </ChartCard>
                 <div className="xl:col-span-2">
-                  <ChartCard title="模型排行 · Token">
+                  <ChartCard title={t('chart.modelRank')}>
                     {modelBarOpt != null ? (
                       <EChart option={modelBarOpt} className="h-60 w-full" />
                     ) : (
-                      <EmptyState title="暂无数据" description="当前范围内没有模型调用记录。" />
+                      <EmptyState title={t('chart.empty.title')} description={t('chart.modelRank.empty.desc')} />
                     )}
                   </ChartCard>
                 </div>
@@ -663,28 +687,28 @@ export default function App(): JSX.Element {
               <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
                 <div className="xl:col-span-2">
                   <ChartCard
-                    title="活跃热力图 · 7×24"
+                    title={t('chart.heatmap')}
                     actions={
                       <span className="text-ui-xs text-foreground-subtlest">
-                        {cacheHit != null ? `缓存命中率 ${cacheHit.toFixed(1)}%` : ''}
+                        {cacheHit != null ? t('chart.heatmap.cacheHit', { pct: cacheHit.toFixed(1) }) : ''}
                       </span>
                     }
                   >
                     <EChart option={heatmapOpt ?? {}} className="h-48 w-full" />
                   </ChartCard>
                 </div>
-                <ChartCard title="工具调用排行">
+                <ChartCard title={t('chart.toolRank')}>
                   {toolBarOpt != null ? (
                     <EChart option={toolBarOpt} className="h-48 w-full" />
                   ) : (
-                    <EmptyState title="暂无工具调用" description="该 Agent 尚未上报工具调用数据。" />
+                    <EmptyState title={t('chart.toolRank.empty.title')} description={t('chart.toolRank.empty.desc')} />
                   )}
                 </ChartCard>
               </div>
 
               {/* 每日强度 */}
               {dailyBarOpt != null && (
-                <ChartCard title="每日强度 · 按日 Token">
+                <ChartCard title={t('chart.daily')}>
                   <EChart option={dailyBarOpt} className="h-48 w-full" />
                 </ChartCard>
               )}

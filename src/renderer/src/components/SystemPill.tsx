@@ -6,6 +6,7 @@ import type { JSX } from 'react'
 import type { SystemSnapshotLike } from '@shared/protocol'
 import { nexus } from '../lib/api'
 import { compactNumber } from '../lib/format'
+import { t, useLang } from '../i18n'
 
 function fmtRate(n: number): string {
   if (n >= 1048576) return `${(n / 1048576).toFixed(1)}MB`
@@ -26,6 +27,7 @@ function bar(percent: number | null): JSX.Element {
 }
 
 export function SystemPill(): JSX.Element {
+  useLang() // 语言切换时重渲染
   const [snap, setSnap] = useState<SystemSnapshotLike | null>(null)
   const [open, setOpen] = useState(false)
 
@@ -51,19 +53,19 @@ export function SystemPill(): JSX.Element {
     <div className="relative">
       <button
         type="button"
-        title="系统状态（点击查看详情）"
+        title={t('system.detail')}
         onClick={() => setOpen((v) => !v)}
         className="flex h-7 items-center gap-2 rounded-full bg-surface px-3 font-mono text-ui-xs tabular-nums text-foreground-subtle transition-colors duration-150 hover:text-foreground"
       >
         {snap == null ? (
-          <span>系统采集中…</span>
+          <span>{t('system.collecting')}</span>
         ) : (
           <>
             <span title="CPU">CPU {snap.cpu.loadPercent}%</span>
             <span className="text-hairline">|</span>
-            <span title="内存">内存 {snap.memory.usedPercent}%</span>
+            <span title={t('system.memory')}>{t('system.memoryPct', { pct: snap.memory.usedPercent })}</span>
             <span className="text-hairline">|</span>
-            <span title="网络速率">
+            <span title={t('system.netRate')}>
               ↓{fmtRate(snap.network.rxBytesPerSec)} ↑{fmtRate(snap.network.txBytesPerSec)}
             </span>
           </>
@@ -74,13 +76,13 @@ export function SystemPill(): JSX.Element {
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
           <div className="nx-fade-in absolute right-0 top-9 z-20 w-96 rounded-xl border border-border bg-card p-4">
             <div className="mb-3 flex items-baseline justify-between">
-              <span className="text-ui-base font-medium">系统状态</span>
+              <span className="text-ui-base font-medium">{t('system.title')}</span>
               <span className="font-mono text-ui-xs tabular-nums text-foreground-subtlest">
-                {snap ? `运行 ${Math.floor(snap.uptimeSec / 3600)}h` : '采集中…'}
+                {snap ? t('system.uptime', { h: Math.floor(snap.uptimeSec / 3600) }) : t('system.collecting')}
               </span>
             </div>
             {snap == null ? (
-              <div className="py-6 text-center text-ui-sm text-foreground-subtle">等待系统采样…</div>
+              <div className="py-6 text-center text-ui-sm text-foreground-subtle">{t('system.waiting')}</div>
             ) : (
               <div className="grid grid-cols-2 gap-x-5 gap-y-3">
                 <div className="flex flex-col gap-1">
@@ -92,7 +94,7 @@ export function SystemPill(): JSX.Element {
                 </div>
                 <div className="flex flex-col gap-1">
                   <div className="flex items-baseline justify-between gap-2">
-                    <span className="text-ui-xs text-foreground-subtle">内存</span>
+                    <span className="text-ui-xs text-foreground-subtle">{t('system.memory')}</span>
                     <span className="font-mono text-ui-sm tabular-nums text-foreground">{snap.memory.usedPercent}%</span>
                   </div>
                   {bar(snap.memory.usedPercent)}
@@ -116,14 +118,14 @@ export function SystemPill(): JSX.Element {
                 </div>
                 <div className="flex flex-col gap-1">
                   <div className="flex items-baseline justify-between gap-2">
-                    <span className="text-ui-xs text-foreground-subtle">网络</span>
+                    <span className="text-ui-xs text-foreground-subtle">{t('system.network')}</span>
                     <span className="font-mono text-ui-sm tabular-nums text-foreground">
                       ↓{compactNumber(snap.network.rxBytesPerSec)} ↑{compactNumber(snap.network.txBytesPerSec)}
                     </span>
                   </div>
                   {mainDisk && (
                     <span className="font-mono text-ui-xs tabular-nums text-foreground-subtlest">
-                      {mainDisk.mount} 已用 {mainDisk.usePercent}%
+                      {mainDisk.mount} · {mainDisk.usePercent}%
                     </span>
                   )}
                 </div>

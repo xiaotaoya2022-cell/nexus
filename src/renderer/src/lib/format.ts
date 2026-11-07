@@ -1,12 +1,28 @@
-// 数字与时间格式化：数值一律等宽 tabular-nums 呈现（规范 §2.1）。
+// 数字/时间格式化。语言相关的量级与相对时间走 i18n（t() 纯函数，非组件可用）。
 
-// 中文数量级（用户口径：16.28B → 162.8亿）；同时是图表轴/标签/图例的统一单位
+import { getLang, t } from '../i18n'
+
 export function compactNumber(n: number): string {
   const abs = Math.abs(n)
+  if (getLangSafe() === 'en') {
+    if (abs >= 1e12) return `${(n / 1e12).toFixed(2)}T`
+    if (abs >= 1e9) return `${(n / 1e9).toFixed(2)}B`
+    if (abs >= 1e6) return `${(n / 1e6).toFixed(1)}M`
+    if (abs >= 1e3) return `${(n / 1e3).toFixed(1)}K`
+    return String(Math.round(n))
+  }
   if (abs >= 1e12) return `${(n / 1e12).toFixed(2)}万亿`
   if (abs >= 1e8) return `${(n / 1e8).toFixed(1)}亿`
   if (abs >= 1e4) return `${(n / 1e4).toFixed(1)}万`
   return String(Math.round(n))
+}
+
+function getLangSafe(): string {
+  try {
+    return getLang()
+  } catch {
+    return 'zh-CN'
+  }
 }
 
 export function fullNumber(n: number): string {
@@ -38,12 +54,12 @@ export function formatDayLabel(day: string): string {
 }
 
 export function relativeTime(ms: number | null): string {
-  if (ms == null || ms <= 0) return '无记录'
+  if (ms == null || ms <= 0) return t('time.noRecord')
   const diff = Date.now() - ms
-  if (diff < 60_000) return '刚刚'
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`
-  return `${Math.floor(diff / 86_400_000)} 天前`
+  if (diff < 60_000) return t('time.justNow')
+  if (diff < 3_600_000) return t('time.minutesAgo', { n: Math.floor(diff / 60_000) })
+  if (diff < 86_400_000) return t('time.hoursAgo', { n: Math.floor(diff / 3_600_000) })
+  return t('time.daysAgo', { n: Math.floor(diff / 86_400_000) })
 }
 
 export function shortDir(dir: string | null): string {

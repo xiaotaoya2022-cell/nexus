@@ -6,6 +6,7 @@ import { useState } from 'react'
 import type { JSX } from 'react'
 import type { SessionRow } from '@shared/types'
 import { compactNumber, fullNumber, relativeTime, shortDir, shortId } from '@renderer/lib/format'
+import { t, useLang } from '../i18n'
 import { EmptyState } from './ui'
 
 const EYE_KEY = 'nexus.sessionsHidden'
@@ -33,6 +34,7 @@ export function SessionsPanel({
   /** 与环形图/侧栏一致的全局 Agent 配色（红队 N-15） */
   agentColors: Map<string, string>
 }): JSX.Element {
+  useLang() // 语言切换时重渲染
   const [hidden, setHidden] = useState(loadHidden)
 
   const toggle = (): void => {
@@ -50,17 +52,17 @@ export function SessionsPanel({
   return (
     <aside className="flex w-[320px] shrink-0 flex-col gap-2 rounded-xl bg-panel p-3">
       <header className="flex items-center justify-between px-1">
-        <h2 className="text-ui-base font-medium text-foreground">会话明细</h2>
+        <h2 className="text-ui-base font-medium text-foreground">{t('sessions.title')}</h2>
         <span className="flex items-center gap-1.5">
           <span
             className="font-mono text-ui-xs tabular-nums text-foreground-subtlest"
-            title={`共 ${sessions.length} 条（最多显示前 120 条）`}
+            title={t('sessions.count', { n: sessions.length })}
           >
             {sessions.length > 120 ? `120 / ${sessions.length}` : sessions.length}
           </span>
           <button
             type="button"
-            title={hidden ? '显示敏感信息（标题/路径/Token 数）' : '隐藏敏感信息（截屏/演示用）'}
+            title={hidden ? t('sessions.mask.off') : t('sessions.mask.on')}
             aria-pressed={hidden}
             onClick={toggle}
             className="flex size-6 items-center justify-center rounded-md text-foreground-subtle transition-colors duration-150 hover:bg-hover hover:text-foreground"
@@ -71,7 +73,7 @@ export function SessionsPanel({
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {sessions.length === 0 ? (
-          <EmptyState title="暂无会话" description="该范围内没有会话记录，试试切换时间范围。" />
+          <EmptyState title={t('sessions.empty.title')} description={t('sessions.empty.desc')} />
         ) : (
           <ul className="space-y-0.5">
             {sessions.map((s) => {
@@ -99,7 +101,7 @@ export function SessionsPanel({
                   </span>
                   <span
                     className="shrink-0 font-mono text-ui-xs tabular-nums text-foreground-subtle"
-                    title={`${fullNumber(s.tokens)} tokens / ${s.requests} 次请求`}
+                    title={t('sessions.tip', { tokens: fullNumber(s.tokens), n: s.requests })}
                   >
                     {s.tokens > 0 ? compactNumber(s.tokens) : '—'}
                   </span>

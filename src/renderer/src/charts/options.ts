@@ -4,6 +4,7 @@
 import type { EChartsOption } from 'echarts'
 import type { HeatmapData, NamedStat, ToolStat, TrendPoint, TokenTypeStat } from '@shared/types'
 import { compactNumber, formatDayLabel, fullNumber } from '@renderer/lib/format'
+import { getLang, t } from '../i18n'
 
 export interface ChartTokens {
   fg: string
@@ -72,13 +73,22 @@ export function agentColorMap(names: string[], tokens: ChartTokens): Map<string,
 /** Y 轴按可见峰值统一单位（全 B 或全 M…），避免 B/M 混排误读 */
 function fixedUnitFormatter(points: Array<{ total: number }>): (v: number) => string {
   const max = Math.max(1, ...points.map((p) => p.total))
-  // 中文数量级（与 compactNumber 同口径）
-  const units: Array<[string, number]> = [
-    ['万亿', 1e12],
-    ['亿', 1e8],
-    ['万', 1e4],
-    ['', 1]
-  ]
+  // 数量级台阶按语言：中文 万/亿/万亿，英文 K/M/B/T
+  const units: Array<[string, number]> =
+    getLang() === 'en'
+      ? [
+          ['T', 1e12],
+          ['B', 1e9],
+          ['M', 1e6],
+          ['K', 1e3],
+          ['', 1]
+        ]
+      : [
+          ['万亿', 1e12],
+          ['亿', 1e8],
+          ['万', 1e4],
+          ['', 1]
+        ]
   const unit = units.find(([, d]) => max >= d) ?? ['', 1]
   return (v) => (unit[1] === 1 ? String(Math.round(v)) : `${(v / unit[1]).toFixed(1)}${unit[0]}`)
 }
@@ -143,7 +153,7 @@ export function trendOption(
 // ── 7x24 热力图 ──
 export function heatmapOption(data: HeatmapData, tokens: ChartTokens): EChartsOption {
   const hours = Array.from({ length: 24 }, (_, h) => h)
-  const weekdayLabels = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+  const weekdayLabels = [0, 1, 2, 3, 4, 5, 6].map((i) => t(`weekday.${i}`))
   const lookup = new Map(data.cells.map(([h, w, t]) => [`${h}:${w}`, t]))
   const grid: Array<[number, number, number]> = []
   for (const w of [0, 1, 2, 3, 4, 5, 6]) {

@@ -29,6 +29,12 @@ export function rangeStartMs(range: RangeKey, now = Date.now()): number {
     d.setHours(0, 0, 0, 0)
     return d.getTime()
   }
+  if (range === 'yesterday') {
+    // 昨日窗口起点：昨日本地零点（终点由 getBoard 特判为今日零点）
+    const d = new Date(now)
+    d.setHours(0, 0, 0, 0)
+    return d.getTime() - 86400_000
+  }
   if (range === 'month') {
     const d = new Date(now)
     d.setDate(1)
@@ -369,7 +375,13 @@ export class QueryService {
   ): BoardData {
     // 自定义时间段：since/until 直接给定（不缓存——范围组合无界）
     const since = custom ? custom.start : rangeStartMs(range, now)
-    const until = custom ? custom.end : now
+    let until = custom ? custom.end : now
+    // 昨日：固定窗口 [昨日本地零点, 今日本地零点)，缓存键含 range 天然区分
+    if (!custom && range === 'yesterday') {
+      const d = new Date(now)
+      d.setHours(0, 0, 0, 0)
+      until = d.getTime()
+    }
     const cacheKey = custom ? `custom:${since}:${until}:${agent ?? 'all'}` : `${range}:${agent ?? 'all'}`
     if (agent === null && !custom) {
       const hit = this.boardCache.get(cacheKey)
