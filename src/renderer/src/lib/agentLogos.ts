@@ -13,6 +13,8 @@ import qoder from '@renderer/assets/agent-logos/qoder.png'
 import zcode from '@renderer/assets/agent-logos/zcode.png'
 import workbuddySvg from '@renderer/assets/agent-logos/workbuddy.svg'
 import reasonixSvg from '@renderer/assets/agent-logos/reasonix.svg'
+import mimoPng from '@renderer/assets/agent-logos/mimo.png'
+import museSvg from '@renderer/assets/agent-logos/muse.svg'
 
 export const AGENT_LOGOS: Record<string, string> = {
   zcode,
@@ -25,5 +27,7 @@ export const AGENT_LOGOS: Record<string, string> = {
   qoder,
   trae,
   workbuddy: workbuddySvg,
-  reasonix: reasonixSvg
+  reasonix: reasonixSvg,
+  mimo: mimoPng,
+  muse: museSvg
 }

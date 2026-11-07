@@ -44,3 +44,6 @@ sidecars/tailscale-sidecar/*.log
 
 # wireguard-android 源码（第三方，构建时拉取；不入库）
 apps/mobile/wireguard-android-src/
+
+# logo 抓取临时目录
+tmp-logos/
