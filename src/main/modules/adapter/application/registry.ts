@@ -16,6 +16,8 @@ import { DshAdapter } from '../infrastructure/dsh'
 import { ReasonixAdapter } from '../infrastructure/reasonix'
 import { OpencodeAdapter } from '../infrastructure/opencode'
 import { WorkBuddyAdapter } from '../infrastructure/workbuddy'
+import { MimoAdapter } from '../infrastructure/mimo'
+import { MuseAdapter } from '../infrastructure/muse'
 
 export function createAdapters(store: StoreWriter): AgentAdapter[] {
   return [
@@ -27,7 +29,9 @@ export function createAdapters(store: StoreWriter): AgentAdapter[] {
     new DshAdapter(store),
     new ReasonixAdapter(store),
     new OpencodeAdapter(store),
-    new WorkBuddyAdapter(store)
+    new WorkBuddyAdapter(store),
+    new MimoAdapter(store),
+    new MuseAdapter(store)
   ]
 }
 

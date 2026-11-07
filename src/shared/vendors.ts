@@ -19,6 +19,8 @@ export const VENDORS: Record<string, VendorMeta> = {
   cursor: { id: 'cursor', label: 'Cursor', color: '#6E7681', initial: 'C' },
   zai: { id: 'zai', label: 'Z.ai', color: '#7C5CFF', initial: 'Z' },
   reasonix: { id: 'reasonix', label: 'Reasonix', color: '#F59E0B', initial: 'R' },
+  xiaomi: { id: 'xiaomi', label: '小米', color: '#FF6900', initial: '米' },
+  meta: { id: 'meta', label: 'Meta', color: '#0084FF', initial: 'M' },
   oss: { id: 'oss', label: '开源', color: '#2EA043', initial: '开' }
 }
 
@@ -29,6 +31,8 @@ export const AGENT_VENDOR: Record<string, string> = {
   dsh: 'deepseek',
   codex: 'openai',
   opencode: 'oss',
+  mimo: 'xiaomi',
+  muse: 'meta',
   workbuddy: 'tencent',
   reasonix: 'reasonix',
   antigravity: 'google',
