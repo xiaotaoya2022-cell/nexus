@@ -259,7 +259,7 @@ export default function App(): JSX.Element {
             aria-hidden
             className="relative flex size-6 items-center justify-center overflow-hidden rounded-md
               bg-[linear-gradient(180deg,#ffffff_0%,#eaeaec_100%)]
-              shadow-[0_1px_3px_rgba(0,0,0,0.22)]
+              shadow-[0_1px_2px_rgba(0,0,0,0.08)]
               before:pointer-events-none before:absolute before:inset-0 before:rounded-[inherit]
               before:border before:border-black/10"
           >
