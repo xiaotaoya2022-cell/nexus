@@ -485,7 +485,8 @@ export class QueryService {
         return filled
       }
       const result = [...points.values()].sort((x, y) => (x.bucket < y.bucket ? -1 : 1))
-      if (range !== 'all' && result.length > 1) {
+      // 昨日恒补桶：固定两日窗口（昨日+今日零点边界），单数据点也要画线（否则 ECharts 单点无曲线）
+      if (range !== 'all' && (result.length > 1 || range === 'yesterday')) {
         const filled: TrendPoint[] = []
         const cursor = new Date(custom ? custom.start : rangeStartMs(range, now))
         while (cursor.getTime() <= until) {

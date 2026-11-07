@@ -213,10 +213,10 @@ export function ExportIcon(): JSX.Element {
   )
 }
 
-/** 时间范围选项（label 渲染期由 t(`range.${key}`) 生成，支持 i18n 与昨日） */
+/** 时间范围选项（label 渲染期由 t(`range.${key}`) 生成；昨日置于今日左侧，PO 指定） */
 export const RANGE_OPTIONS: Array<{ key: RangeKey }> = [
-  { key: 'today' },
   { key: 'yesterday' },
+  { key: 'today' },
   { key: '7d' },
   { key: '30d' },
   { key: 'month' },

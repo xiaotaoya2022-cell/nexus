@@ -18,6 +18,8 @@ import museSvg from '@renderer/assets/agent-logos/muse.svg'
 import clineSvg from '@renderer/assets/logos/cline.svg'
 import geminiSvg from '@renderer/assets/agent-logos/googlegemini.svg'
 import qwenSvg from '@renderer/assets/agent-logos/qwen.svg'
+import rooCode from '@renderer/assets/agent-logos/roo-code.png'
+import kiloCode from '@renderer/assets/agent-logos/kilo-code.png'
 
 export const AGENT_LOGOS: Record<string, string> = {
   zcode,
@@ -35,5 +37,7 @@ export const AGENT_LOGOS: Record<string, string> = {
   muse: museSvg,
   cline: clineSvg,
   'gemini-cli': geminiSvg,
-  qwen: qwenSvg
+  qwen: qwenSvg,
+  'roo-code': rooCode,
+  'kilo-code': kiloCode
 }
