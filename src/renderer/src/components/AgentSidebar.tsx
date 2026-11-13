@@ -2,7 +2,7 @@
 // 两种分类视图（用户需求）：按 Agent（默认）/ 按厂商（分组聚合，可展开下钻）。
 // 视图选择持久化在 localStorage。
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { JSX } from 'react'
 import type { AgentInfo } from '@shared/types'
 import { vendorOf, type VendorMeta } from '@shared/vendors'
@@ -10,6 +10,7 @@ import { relativeTime } from '@renderer/lib/format'
 import { AnimatedNumber } from './RollingNumber'
 import { VendorBadge } from './VendorBadge'
 import { AgentLogo } from './AgentLogo'
+import { AutoListHighlight, SlidingTabIndicator } from './SmoothHighlight'
 import { StatusDot, statusText } from './ui'
 import { t, useLang } from '../i18n'
 import { useUi } from '@renderer/store'
@@ -39,7 +40,7 @@ export function AgentSidebar({
   const [view, setView] = useState<SidebarView>(loadView)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
 
-  const todayTotal = agents.reduce((sum, a) => sum + a.todayTokens, 0)
+  const rangeTotal = agents.reduce((sum, a) => sum + (a.rangeTokens ?? a.todayTokens), 0)
   const anyActive = agents.some((a) => a.status === 'active' || a.status === 'idle')
 
   const switchView = (v: SidebarView): void => {
@@ -66,8 +67,8 @@ export function AgentSidebar({
       g.items.push(a)
     }
     vendorGroups.sort((x, y) => {
-      const tx = x.items.reduce((s, a) => s + a.todayTokens, 0)
-      const ty = y.items.reduce((s, a) => s + a.todayTokens, 0)
+      const tx = x.items.reduce((s, a) => s + (a.rangeTokens ?? a.todayTokens), 0)
+      const ty = y.items.reduce((s, a) => s + (a.rangeTokens ?? a.todayTokens), 0)
       return ty - tx
     })
   }
@@ -81,29 +82,37 @@ export function AgentSidebar({
     })
   }
 
-  const agentRow = (a: AgentInfo, indent = false): JSX.Element => (
-    <button
-      key={a.id}
-      type="button"
-      onClick={() => setAgent(agent === a.id ? null : a.id)}
-      title={`${a.label} · ${statusText(a.status)}`}
-      className={`group flex w-full cursor-pointer items-center gap-2 rounded-lg pr-1 py-1 transition-colors duration-150 ${
-        indent ? 'pl-5' : 'pl-2.5'
-      } ${agent === a.id ? 'bg-selected' : 'hover:bg-surface-hover'}`}
-    >
-      <StatusDot status={a.status} />
-      <AgentLogo agentId={a.id} vendor={vendorOf(a.id)} />
-      <span className="min-w-0 flex-1 text-left">
-        <span className="block truncate text-ui-base text-foreground">{a.label}</span>
-        <span className="block truncate font-mono text-ui-xs text-foreground-subtlest">
-          {a.note ?? relativeTime(a.lastActivityAt)}
+  const navRef = useRef<HTMLElement>(null)
+
+  const agentRow = (a: AgentInfo, indent = false): JSX.Element => {
+    const tokens = a.rangeTokens ?? a.todayTokens
+    const active = agent === a.id
+    return (
+      <button
+        key={a.id}
+        type="button"
+        data-list-row=""
+        data-active={active ? 'true' : undefined}
+        onClick={() => setAgent(active ? null : a.id)}
+        title={`${a.label} · ${statusText(a.status)}`}
+        className={`group flex w-full cursor-pointer items-center gap-2 rounded-lg pr-1 py-1 transition-colors duration-150 ${
+          indent ? 'pl-5' : 'pl-2.5'
+        } ${active ? 'bg-selected nx-nav-active' : 'hover:bg-surface-hover'}`}
+      >
+        <StatusDot status={a.status} />
+        <AgentLogo agentId={a.id} vendor={vendorOf(a.id)} />
+        <span className="min-w-0 flex-1 text-left">
+          <span className="block truncate text-ui-base text-foreground">{a.label}</span>
+          <span className="block truncate font-mono text-ui-xs text-foreground-subtlest">
+            {a.note ?? relativeTime(a.lastActivityAt)}
+          </span>
         </span>
-      </span>
-      <span className="font-mono text-ui-xs tabular-nums text-foreground-subtle">
-        {a.todayTokens > 0 ? <AnimatedNumber num={a.todayTokens} toggleable={false} /> : ''}
-      </span>
-    </button>
-  )
+        <span className="font-mono text-ui-xs tabular-nums text-foreground-subtle">
+          {tokens > 0 ? <AnimatedNumber num={tokens} toggleable={false} /> : ''}
+        </span>
+      </button>
+    )
+  }
 
   return (
     <aside className="flex w-[264px] shrink-0 flex-col bg-background">
@@ -112,7 +121,8 @@ export function AgentSidebar({
           {view === 'agent' ? `AGENTS · ${agents.length}` : `${t('sidebar.vendor')} · ${new Set(agents.map((a) => vendorOf(a.id).id)).size}`}
         </span>
         {/* 视图切换：按 Agent / 按厂商 */}
-        <span className="flex h-5 items-center rounded-full bg-surface p-0.5">
+        <span className="relative isolate flex h-5 items-center rounded-full bg-surface p-0.5">
+          <SlidingTabIndicator activeSelector='button[data-active="true"]' />
           {(
             [
               ['agent', t('sidebar.agent')],
@@ -122,9 +132,10 @@ export function AgentSidebar({
             <button
               key={v}
               type="button"
+              data-active={view === v ? 'true' : undefined}
               onClick={() => switchView(v)}
-              className={`h-4 rounded-full px-1.5 text-ui-xs leading-4 transition-colors duration-150 ${
-                view === v ? 'bg-raised font-medium text-foreground' : 'text-foreground-subtle hover:text-foreground'
+              className={`relative z-10 h-4 cursor-pointer rounded-full px-1.5 text-ui-xs leading-4 transition-colors duration-150 ${
+                view === v ? 'font-medium text-foreground' : 'text-foreground-subtle hover:text-foreground'
               }`}
             >
               {label}
@@ -132,14 +143,21 @@ export function AgentSidebar({
           ))}
         </span>
       </div>
-      <nav className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
+      <nav ref={navRef} className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
+        <AutoListHighlight
+          rootRef={navRef}
+          rowSelector="[data-list-row]"
+          activeRowSelector='[data-list-row][data-active="true"]'
+        />
         {/* 全部：跨 Agent 汇总（对应全局 agent=null 视图） */}
         <button
           type="button"
+          data-list-row=""
+          data-active={agent === null ? 'true' : undefined}
           onClick={() => setAgent(null)}
-          title={t('sidebar.todayTotal', { tokens: todayTotal })}
-          className={`mb-1 flex w-full cursor-pointer items-center gap-2 rounded-lg border-b border-hairline pb-1.5 pl-2.5 pr-1 pt-1 transition-colors duration-150 ${
-            agent === null ? 'bg-selected' : 'hover:bg-surface-hover'
+          title={t('sidebar.todayTotal', { tokens: rangeTotal })}
+          className={`flex w-full cursor-pointer items-center gap-2 rounded-lg py-1.5 pl-2.5 pr-1 transition-colors duration-150 ${
+            agent === null ? 'bg-selected nx-nav-active' : 'hover:bg-surface-hover'
           }`}
         >
           <span
@@ -153,19 +171,21 @@ export function AgentSidebar({
             <span className="block truncate text-ui-xs text-foreground-subtlest">{t('sidebar.allAgents.sub')}</span>
           </span>
           <span className="font-mono text-ui-xs tabular-nums text-foreground-subtle">
-            {todayTotal > 0 ? <AnimatedNumber num={todayTotal} toggleable={false} /> : ''}
+            {rangeTotal > 0 ? <AnimatedNumber num={rangeTotal} toggleable={false} /> : ''}
           </span>
         </button>
+        <div className="my-1 border-b border-hairline" />
         {view === 'agent'
           ? agents.map((a) => agentRow(a))
           : vendorGroups.map((g) => {
-              const groupTotal = g.items.reduce((sum, a) => sum + a.todayTokens, 0)
+              const groupTotal = g.items.reduce((sum, a) => sum + (a.rangeTokens ?? a.todayTokens), 0)
               const latest = g.items.reduce((m, a) => Math.max(m, a.lastActivityAt ?? 0), 0)
               const isCollapsed = collapsed.has(g.vendor.id)
               return (
                 <div key={g.vendor.id}>
                   <button
                     type="button"
+                    data-list-row=""
                     onClick={() => toggleGroup(g.vendor.id)}
                     title={t('sidebar.groupSummary', { vendor: g.vendor.label, n: g.items.length, tokens: groupTotal })}
                     className="group flex w-full cursor-pointer items-center gap-2 rounded-lg pl-2.5 pr-1 py-1 transition-colors duration-150 hover:bg-surface-hover"

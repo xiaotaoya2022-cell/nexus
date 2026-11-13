@@ -2,6 +2,7 @@
 // 时间口径：库内 ts 为 epoch ms；日期分桶用 SQLite localtime 修饰符（跟随本机时区），
 // today 的起点取 JS 本地零点，两者一致。
 
+import os from 'node:os'
 import type {
   BoardData,
   CalendarDay,
@@ -78,9 +79,30 @@ function normalize(row: Partial<SumRow> | undefined): SumRow {
 }
 
 export class QueryService {
-  constructor(private readonly store: NexusStore) {}
+  constructor(
+    private readonly store: NexusStore,
+    private readonly getLocalNodeId: () => string = () => store.getSetting('meshNodeId') ?? 'local'
+  ) {}
 
-  private where(range: RangeKey, agent: string | null, now: number): {
+  private resolveNodeFilter(nodeId?: string | null): string | null {
+    if (!nodeId || nodeId === 'all') return null
+    const localId = this.getLocalNodeId()
+    return nodeId === 'local' || nodeId === localId ? 'local' : nodeId
+  }
+
+  private buildNodeLabels(): Map<string, string> {
+    const labels = new Map<string, string>()
+    const localAlias = this.store.getSetting('meshNodeAlias')
+    const localName = localAlias && localAlias.trim() ? localAlias.trim() : os.hostname()
+    labels.set('local', localName)
+    labels.set(this.getLocalNodeId(), localName)
+    for (const n of this.store.listMeshNodeRecords()) {
+      labels.set(n.nodeId, n.alias || n.hostname)
+    }
+    return labels
+  }
+
+  private where(range: RangeKey, agent: string | null, now: number, nodeFilter: string | null = null): {
     sql: string
     params: Array<string | number>
   } {
@@ -91,28 +113,55 @@ export class QueryService {
       conds.push('agent = ?')
       params.push(agent)
     }
+    if (nodeFilter) {
+      conds.push('source_node_id = ?')
+      params.push(nodeFilter)
+    }
     return { sql: `WHERE ${conds.join(' AND ')}`, params }
   }
 
-  getOverview(range: RangeKey, agent: string | null, now = Date.now()): Overview {
-    const w = this.where(range, agent, now)
+  getOverview(range: RangeKey, agent: string | null, now = Date.now(), nodeId: string | null = null): Overview {
+    const nodeFilter = this.resolveNodeFilter(nodeId)
+    const w = this.where(range, agent, now, nodeFilter)
     const sum = normalize(
       this.store.db
         .prepare(`SELECT ${SUMS} FROM usage_records ${w.sql}`)
         .get(...w.params) as Partial<SumRow> | undefined
     )
+    const since = rangeStartMs(range, now)
+    const sessConds = ['COALESCE(updated_at, started_at, 0) >= ?']
+    const sessParams: Array<string | number> = [since]
+    if (agent) {
+      sessConds.push('agent = ?')
+      sessParams.push(agent)
+    }
+    if (nodeFilter) {
+      sessConds.push('source_node_id = ?')
+      sessParams.push(nodeFilter)
+    }
     const sessionRow = this.store.db
       .prepare(
-        `SELECT COUNT(DISTINCT session_id) c FROM usage_records ${w.sql} AND session_id IS NOT NULL`
+        `SELECT COUNT(*) c FROM (
+           SELECT source_node_id, agent, session_id FROM usage_records ${w.sql} AND session_id IS NOT NULL
+           UNION
+           SELECT source_node_id, agent, session_id FROM sessions
+           WHERE ${sessConds.join(' AND ')}
+         )`
       )
-      .get(...w.params) as { c: number } | undefined
+      .get(...w.params, ...sessParams) as { c: number } | undefined
+    const toolConds = ['ts >= ?']
+    const toolParams: Array<string | number> = [since]
+    if (agent) {
+      toolConds.push('agent = ?')
+      toolParams.push(agent)
+    }
+    if (nodeFilter) {
+      toolConds.push('source_node_id = ?')
+      toolParams.push(nodeFilter)
+    }
     const toolRow = this.store.db
-      .prepare(
-        `SELECT COUNT(*) c FROM tool_calls WHERE ts >= ? ${agent ? 'AND agent = ?' : ''}`
-      )
-      .get(...(agent ? [rangeStartMs(range, now), agent] : [rangeStartMs(range, now)])) as
-      | { c: number }
-      | undefined
+      .prepare(`SELECT COUNT(*) c FROM tool_calls WHERE ${toolConds.join(' AND ')}`)
+      .get(...toolParams) as { c: number } | undefined
     const modelRow = this.store.db
       .prepare(`SELECT COUNT(DISTINCT model) c FROM usage_records ${w.sql}`)
       .get(...w.params) as { c: number } | undefined
@@ -145,6 +194,7 @@ export class QueryService {
     return {
       range,
       agent,
+      nodeId,
       totals,
       sessionCount: Number(sessionRow?.c) || 0,
       toolCallCount: Number(toolRow?.c) || 0,
@@ -156,9 +206,10 @@ export class QueryService {
     range: RangeKey,
     agent: string | null,
     groupBy: 'model' | 'agent',
-    now = Date.now()
+    now = Date.now(),
+    nodeId: string | null = null
   ): TrendPoint[] {
-    const w = this.where(range, agent, now)
+    const w = this.where(range, agent, now, this.resolveNodeFilter(nodeId))
     const bucketExpr =
       range === 'today'
         ? `strftime('%H', ts/1000, 'unixepoch', 'localtime') || ':00'`
@@ -248,24 +299,24 @@ export class QueryService {
       .sort((a, b) => b.tokens - a.tokens)
   }
 
-  getByAgent(range: RangeKey, now = Date.now()): NamedStat[] {
-    const w = this.where(range, null, now)
+  getByAgent(range: RangeKey, now = Date.now(), nodeId: string | null = null): NamedStat[] {
+    const w = this.where(range, null, now, this.resolveNodeFilter(nodeId))
     return this.namedStats(
       `SELECT agent g, ${SUMS} FROM usage_records ${w.sql} GROUP BY agent`,
       w.params
     )
   }
 
-  getByModel(range: RangeKey, agent: string | null, now = Date.now()): NamedStat[] {
-    const w = this.where(range, agent, now)
+  getByModel(range: RangeKey, agent: string | null, now = Date.now(), nodeId: string | null = null): NamedStat[] {
+    const w = this.where(range, agent, now, this.resolveNodeFilter(nodeId))
     return this.namedStats(
       `SELECT model g, ${SUMS} FROM usage_records ${w.sql} GROUP BY model`,
       w.params
     )
   }
 
-  getTokenTypeBreakdown(range: RangeKey, agent: string | null, now = Date.now()): TokenTypeStat[] {
-    const w = this.where(range, agent, now)
+  getTokenTypeBreakdown(range: RangeKey, agent: string | null, now = Date.now(), nodeId: string | null = null): TokenTypeStat[] {
+    const w = this.where(range, agent, now, this.resolveNodeFilter(nodeId))
     const s = normalize(
       this.store.db
         .prepare(`SELECT ${SUMS} FROM usage_records ${w.sql}`)
@@ -280,8 +331,8 @@ export class QueryService {
     ]
   }
 
-  getHeatmap(range: RangeKey, agent: string | null, now = Date.now()): HeatmapData {
-    const w = this.where(range, agent, now)
+  getHeatmap(range: RangeKey, agent: string | null, now = Date.now(), nodeId: string | null = null): HeatmapData {
+    const w = this.where(range, agent, now, this.resolveNodeFilter(nodeId))
     const rows = this.store.db
       .prepare(
         `SELECT CAST(strftime('%H', ts/1000, 'unixepoch', 'localtime') AS INTEGER) h,
@@ -303,8 +354,8 @@ export class QueryService {
     return { cells, max }
   }
 
-  getCalendar(range: RangeKey, agent: string | null, now = Date.now()): CalendarDay[] {
-    const w = this.where(range, agent, now)
+  getCalendar(range: RangeKey, agent: string | null, now = Date.now(), nodeId: string | null = null): CalendarDay[] {
+    const w = this.where(range, agent, now, this.resolveNodeFilter(nodeId))
     const rows = this.store.db
       .prepare(
         `SELECT strftime('%Y-%m-%d', ts/1000, 'unixepoch', 'localtime') d, SUM(${TOTAL_EXPR}) t
@@ -314,46 +365,83 @@ export class QueryService {
     return rows.map((r) => ({ day: String(r.d), tokens: Number(r.t) || 0 }))
   }
 
-  getToolStats(range: RangeKey, agent: string | null, now = Date.now()): ToolStat[] {
+  getToolStats(range: RangeKey, agent: string | null, now = Date.now(), nodeId: string | null = null): ToolStat[] {
     const since = rangeStartMs(range, now)
+    const nodeFilter = this.resolveNodeFilter(nodeId)
+    const conds = ['ts >= ?']
+    const params: Array<string | number> = [since]
+    if (agent) {
+      conds.push('agent = ?')
+      params.push(agent)
+    }
+    if (nodeFilter) {
+      conds.push('source_node_id = ?')
+      params.push(nodeFilter)
+    }
     const rows = this.store.db
       .prepare(
         `SELECT tool_name t, COUNT(*) c FROM tool_calls
-         WHERE ts >= ? ${agent ? 'AND agent = ?' : ''} GROUP BY tool_name ORDER BY c DESC LIMIT 12`
+         WHERE ${conds.join(' AND ')} GROUP BY tool_name ORDER BY c DESC LIMIT 12`
       )
-      .all(...(agent ? [since, agent] : [since])) as Array<Record<string, unknown>>
+      .all(...params) as Array<Record<string, unknown>>
     return rows.map((r) => ({ tool: String(r.t), count: Number(r.c) || 0 }))
   }
 
-  getSessions(range: RangeKey, agent: string | null, limit: number, now = Date.now()): SessionRow[] {
+  getSessions(
+    range: RangeKey,
+    agent: string | null,
+    limit: number,
+    now = Date.now(),
+    nodeId: string | null = null
+  ): SessionRow[] {
     const since = rangeStartMs(range, now)
+    const nodeFilter = this.resolveNodeFilter(nodeId)
+    const localId = this.getLocalNodeId()
+    const labels = this.buildNodeLabels()
+    const conds: string[] = []
+    const params: Array<string | number> = [since]
+    if (agent) {
+      conds.push('s.agent = ?')
+      params.push(agent)
+    }
+    if (nodeFilter) {
+      conds.push('s.source_node_id = ?')
+      params.push(nodeFilter)
+    }
+    params.push(limit)
+    const whereClause = conds.length > 0 ? `WHERE ${conds.join(' AND ')}` : ''
     const rows = this.store.db
       .prepare(
-        `SELECT s.agent, s.session_id, s.title, s.project_dir, s.model, s.started_at, s.updated_at,
+        `SELECT s.source_node_id, s.agent, s.session_id, s.title, s.project_dir, s.model, s.started_at, s.updated_at,
                 ifnull(u.tokens, 0) tokens, ifnull(u.requests, 0) requests
          FROM sessions s
          LEFT JOIN (
-           SELECT agent, session_id, SUM(${TOTAL_EXPR}) tokens, COALESCE(SUM(requests), COUNT(*)) requests
+           SELECT source_node_id, agent, session_id, SUM(${TOTAL_EXPR}) tokens, COALESCE(SUM(requests), COUNT(*)) requests
            FROM usage_records
            WHERE ts >= ? AND session_id IS NOT NULL
-           GROUP BY agent, session_id
-         ) u ON u.agent = s.agent AND u.session_id = s.session_id
-         WHERE (? IS NULL OR s.agent = ?)
+           GROUP BY source_node_id, agent, session_id
+         ) u ON u.source_node_id = s.source_node_id AND u.agent = s.agent AND u.session_id = s.session_id
+         ${whereClause}
          ORDER BY tokens DESC, COALESCE(s.updated_at, 0) DESC
          LIMIT ?`
       )
-      .all(since, agent, agent, limit) as Array<Record<string, unknown>>
-    return rows.map((r) => ({
-      agent: String(r.agent),
-      sessionId: String(r.session_id),
-      title: r.title == null ? null : String(r.title),
-      projectDir: r.project_dir == null ? null : String(r.project_dir),
-      model: r.model == null ? null : String(r.model),
-      startedAt: r.started_at == null ? null : Number(r.started_at),
-      updatedAt: r.updated_at == null ? null : Number(r.updated_at),
-      tokens: Number(r.tokens) || 0,
-      requests: Number(r.requests) || 0
-    }))
+      .all(...params) as Array<Record<string, unknown>>
+    return rows.map((r) => {
+      const src = String(r.source_node_id ?? 'local')
+      return {
+        agent: String(r.agent),
+        sessionId: String(r.session_id),
+        title: r.title == null ? null : String(r.title),
+        projectDir: r.project_dir == null ? null : String(r.project_dir),
+        model: r.model == null ? null : String(r.model),
+        startedAt: r.started_at == null ? null : Number(r.started_at),
+        updatedAt: r.updated_at == null ? null : Number(r.updated_at),
+        tokens: Number(r.tokens) || 0,
+        requests: Number(r.requests) || 0,
+        sourceNodeId: src === 'local' ? localId : src,
+        sourceNodeLabel: labels.get(src) ?? (src === 'local' ? '本机' : src)
+      }
+    })
   }
 
   /** 看板结果缓存：agent=null 的主路径按 range 缓存，sync 有新数据时失效。
@@ -371,7 +459,8 @@ export class QueryService {
     range: RangeKey,
     agent: string | null,
     now = Date.now(),
-    custom?: { start: number; end: number }
+    custom?: { start: number; end: number },
+    nodeId: string | null = null
   ): BoardData {
     // 自定义时间段：since/until 直接给定（不缓存——范围组合无界）
     const since = custom ? custom.start : rangeStartMs(range, now)
@@ -382,21 +471,29 @@ export class QueryService {
       d.setHours(0, 0, 0, 0)
       until = d.getTime()
     }
-    const cacheKey = custom ? `custom:${since}:${until}:${agent ?? 'all'}` : `${range}:${agent ?? 'all'}`
+    const nodeFilter = this.resolveNodeFilter(nodeId)
+    const localId = this.getLocalNodeId()
+    const nodeLabels = this.buildNodeLabels()
+    const cacheKey = custom
+      ? `custom:${since}:${until}:${agent ?? 'all'}:${nodeFilter ?? 'all'}`
+      : `${range}:${agent ?? 'all'}:${nodeFilter ?? 'all'}`
     if (agent === null && !custom) {
       const hit = this.boardCache.get(cacheKey)
       if (hit) return hit
     }
     const whereAgent = agent ? 'AND agent = ?' : ''
-    const params: Array<string | number> = agent ? [since, until, agent] : [since, until]
+    const whereNode = nodeFilter ? 'AND source_node_id = ?' : ''
+    const params: Array<string | number> = [since, until]
+    if (agent) params.push(agent)
+    if (nodeFilter) params.push(nodeFilter)
 
     // ── 主扫描：usage_records 一次物化，JS 单遍聚合 ──
     const rows = this.store.db
       .prepare(
-        `SELECT agent, model, session_id, ts,
+        `SELECT source_node_id, agent, model, session_id, ts,
                 input_tokens i, output_tokens o, reasoning_tokens r,
                 cache_read_tokens cr, cache_write_tokens cw, COALESCE(requests, 1) n
-         FROM usage_records WHERE ts >= ? AND ts <= ? ${whereAgent}`
+         FROM usage_records WHERE ts >= ? AND ts <= ? ${whereAgent} ${whereNode}`
       )
       .all(...params) as Array<Record<string, unknown>>
 
@@ -453,7 +550,8 @@ export class QueryService {
 
       const sid = r.session_id
       if (sid != null && sid !== '') {
-        const skey = `${agentId}\u0000${String(sid)}`
+        const srcNode = String(r.source_node_id ?? 'local')
+        const skey = `${srcNode}\u0000${agentId}\u0000${String(sid)}`
         sessionsSet.add(skey)
         let su = sessionUsage.get(skey)
         if (!su) { su = { agent: agentId, sessionId: String(sid), tokens: 0, requests: 0 }; sessionUsage.set(skey, su) }
@@ -515,15 +613,33 @@ export class QueryService {
     }
 
     // sessions 表 join（会话元数据小表单查）
+    const sessConds: string[] = []
+    const sessParams: Array<string | number> = []
+    if (agent) {
+      sessConds.push('agent = ?')
+      sessParams.push(agent)
+    }
+    if (nodeFilter) {
+      sessConds.push('source_node_id = ?')
+      sessParams.push(nodeFilter)
+    }
+    const sessWhere = sessConds.length > 0 ? `WHERE ${sessConds.join(' AND ')}` : ''
     const sessionRows = this.store.db
       .prepare(
-        `SELECT agent, session_id, title, project_dir, model, started_at, updated_at
-         FROM sessions ${agent ? 'WHERE agent = ?' : ''}`
+        `SELECT source_node_id, agent, session_id, title, project_dir, model, started_at, updated_at
+         FROM sessions ${sessWhere}`
       )
-      .all(...(agent ? [agent] : [])) as Array<Record<string, unknown>>
+      .all(...sessParams) as Array<Record<string, unknown>>
+    for (const r of sessionRows) {
+      const actTs = Number(r.updated_at ?? r.started_at ?? 0)
+      if (actTs >= since && actTs <= until) {
+        sessionsSet.add(`${String(r.source_node_id ?? 'local')}\u0000${String(r.agent)}\u0000${String(r.session_id)}`)
+      }
+    }
     const sessions: SessionRow[] = sessionRows
       .map((r) => {
-        const su = sessionUsage.get(`${String(r.agent)}\u0000${String(r.session_id)}`)
+        const src = String(r.source_node_id ?? 'local')
+        const su = sessionUsage.get(`${src}\u0000${String(r.agent)}\u0000${String(r.session_id)}`)
         return {
           agent: String(r.agent),
           sessionId: String(r.session_id),
@@ -533,7 +649,9 @@ export class QueryService {
           startedAt: r.started_at == null ? null : Number(r.started_at),
           updatedAt: r.updated_at == null ? null : Number(r.updated_at),
           tokens: su?.tokens ?? 0,
-          requests: su?.requests ?? 0
+          requests: su?.requests ?? 0,
+          sourceNodeId: src === 'local' ? localId : src,
+          sourceNodeLabel: nodeLabels.get(src) ?? (src === 'local' ? '本机' : src)
         }
       })
       .sort((a, b) => b.tokens - a.tokens || (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
@@ -547,12 +665,13 @@ export class QueryService {
       if (tokens > heatMax) heatMax = tokens
     }
 
-    const toolParams: Array<string | number> = [since]
+    const toolParams: Array<string | number> = [since, until]
     if (agent) toolParams.push(agent)
+    if (nodeFilter) toolParams.push(nodeFilter)
     const toolRows = this.store.db
       .prepare(
         `SELECT tool_name t, COUNT(*) c FROM tool_calls
-         WHERE ts >= ? ${agent ? 'AND agent = ?' : ''} GROUP BY tool_name ORDER BY c DESC LIMIT 12`
+         WHERE ts >= ? AND ts <= ? ${agent ? 'AND agent = ?' : ''} ${whereNode} GROUP BY tool_name ORDER BY c DESC LIMIT 12`
       )
       .all(...toolParams) as Array<Record<string, unknown>>
 
@@ -560,6 +679,7 @@ export class QueryService {
       overview: {
         range,
         agent,
+        nodeId,
         totals: {
           requests: sum.n,
           input: sum.i, output: sum.o, reasoning: sum.r,
@@ -571,7 +691,7 @@ export class QueryService {
         toolCallCount: Number(
           (this.store.db
             .prepare(
-              `SELECT COUNT(*) c FROM tool_calls WHERE ts >= ? ${agent ? 'AND agent = ?' : ''}`
+              `SELECT COUNT(*) c FROM tool_calls WHERE ts >= ? AND ts <= ? ${agent ? 'AND agent = ?' : ''} ${whereNode}`
             )
             .get(...toolParams) as { c: number } | undefined)?.c ?? 0
         ),

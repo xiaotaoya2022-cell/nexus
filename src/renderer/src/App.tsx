@@ -4,11 +4,18 @@ import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import type { JSX } from 'react'
 import type { EChartsOption } from 'echarts'
 import { nexus } from './lib/api'
+import { CURSOR_TOAST_EVENT } from './lib/cursorConfig'
 import { useUi } from './store'
 import { useDashboard } from './useDashboard'
+import { useMesh } from './useMesh'
 import { EChart } from './charts/EChart'
 import { AgentSidebar } from './components/AgentSidebar'
-import { SessionsPanel } from './components/SessionsPanel'
+import { CursorSettingsSection, GlobalCursorMount } from './components/CustomCursor'
+import { MeshView } from './components/MeshView'
+import { NodeSwitcherBar } from './components/NodeSwitcherBar'
+import { MeshGlyph, nodeDisplayName } from './components/NodeVisuals'
+import { SessionsPanel, type SessionNodeMeta } from './components/SessionsPanel'
+import { SlidingTabIndicator } from './components/SmoothHighlight'
 import { SystemPill } from './components/SystemPill'
 import { AccountPanel } from './components/AccountPanel'
 import { WindowControls } from './components/WindowControls'
@@ -44,22 +51,32 @@ import {
 import {
   compactNumber,
   formatCost,
-  fullNumber
+  fullNumber,
+  relativeTime,
+  shortDir
 } from './lib/format'
-import type { RangeKey } from '@shared/types'
+import type { NamedStat, RangeKey } from '@shared/types'
 
 export default function App(): JSX.Element {
+  const activeView = useUi((s) => s.activeView)
+  const selectedNodeId = useUi((s) => s.selectedNodeId)
   const range = useUi((s) => s.range)
   const agent = useUi((s) => s.agent)
   const theme = useUi((s) => s.theme)
+  const uiStyle = useUi((s) => s.uiStyle)
   // 语言订阅：切换语言时触发 App 重渲染（各子组件自行 useLang）
   useLang()
+  const setActiveView = useUi((s) => s.setActiveView)
+  const setSelectedNodeId = useUi((s) => s.setSelectedNodeId)
   const setTheme = useUi((s) => s.setTheme)
+  const setUiStyle = useUi((s) => s.setUiStyle)
   const setAgent = useUi((s) => s.setAgent)
   const sync = useUi((s) => s.sync)
   const { data, agents, loading, trendGroup, setTrendGroup } = useDashboard()
+  const { meshStatus, actions: meshActions } = useMesh()
   const [toast, setToast] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [sessionsDrawerOpen, setSessionsDrawerOpen] = useState(false)
   const [retention, setRetention] = useState<number>(0)
   const [remoteOn, setRemoteOn] = useState(false)
   const [remoteStatus, setRemoteStatus] = useState<Awaited<ReturnType<typeof nexus.getRemoteStatus>> | null>(null)
@@ -72,6 +89,7 @@ export default function App(): JSX.Element {
     void (async () => {
       const s = await nexus.getSettings()
       useUi.getState().setTheme(s.theme)
+      useUi.getState().setUiStyle(s.uiStyle === 'classic' ? 'classic' : 'nexus')
       const r = await nexus.getSavedRange()
       useUi.getState().setRange(r)
       const cr = await nexus.getCustomRange()
@@ -117,17 +135,44 @@ export default function App(): JSX.Element {
   const [themeEpoch, setThemeEpoch] = useState(0)
   useLayoutEffect(() => {
     const el = document.documentElement
-    el.classList.remove('theme-dark', 'theme-light')
+    el.classList.remove('theme-dark', 'theme-light', 'style-nexus', 'style-classic')
     el.classList.add(theme === 'light' ? 'theme-light' : 'theme-dark')
+    el.classList.add(uiStyle === 'classic' ? 'style-classic' : 'style-nexus')
     setThemeEpoch((v) => v + 1)
-  }, [theme])
+  }, [theme, uiStyle])
 
-  // toast 自动消失
+  // toast 自动消失 + 接收自定义光标系统提示事件
+  useEffect(() => {
+    const onCursorToast = (e: Event): void => {
+      const msg = (e as CustomEvent<string>).detail
+      if (msg) setToast(msg)
+    }
+    window.addEventListener(CURSOR_TOAST_EVENT, onCursorToast)
+    return () => window.removeEventListener(CURSOR_TOAST_EVENT, onCursorToast)
+  }, [])
+
   useEffect(() => {
     if (!toast) return
-    const t = setTimeout(() => setToast(null), 3500)
-    return () => clearTimeout(t)
+    const timer = setTimeout(() => setToast(null), 3500)
+    return () => clearTimeout(timer)
   }, [toast])
+
+  const nodeMetaById = useMemo(() => {
+    const map = new Map<string, SessionNodeMeta>()
+    if (!meshStatus) return map
+    for (const n of meshStatus.nodes) {
+      const entry: SessionNodeMeta = {
+        label: nodeDisplayName(n),
+        kind: n.kind,
+        isLocal: n.isLocal
+      }
+      map.set(n.nodeId, entry)
+      if (n.isLocal) map.set('local', entry)
+    }
+    return map
+  }, [meshStatus])
+  const multiNode = (meshStatus?.nodes.length ?? 0) > 1
+  const meshOnlineCount = meshStatus?.nodes.filter((n) => n.status === 'online').length ?? 0
 
   const tokens = useMemo(() => chartTokens(), [themeEpoch])
 
@@ -159,6 +204,11 @@ export default function App(): JSX.Element {
     await nexus.setTheme(next)
   }
 
+  const changeUiStyle = async (next: 'nexus' | 'classic'): Promise<void> => {
+    setUiStyle(next)
+    await nexus.setUiStyle(next)
+  }
+
   const openSettings = async (): Promise<void> => {
     if (!settingsOpen) {
       setRetention(await nexus.getRetentionDays())
@@ -179,11 +229,41 @@ export default function App(): JSX.Element {
 
   const totalTokens = data?.overview.totals.total ?? 0
 
+  const { histTokens, histLastActive } = useMemo(() => {
+    if (agent) {
+      const a = agents.find((x) => x.id === agent)
+      return {
+        histTokens: a?.totalTokens ?? 0,
+        histLastActive: a?.lastActivityAt ?? null
+      }
+    }
+    return {
+      histTokens: agents.reduce((sum, a) => sum + (a.totalTokens ?? 0), 0),
+      histLastActive:
+        agents.reduce((m, a) => Math.max(m, a.lastActivityAt ?? 0), 0) || null
+    }
+  }, [agent, agents])
+
+  const switchRangeQuick = (r: RangeKey): void => {
+    useUi.getState().setRange(r)
+    void nexus.setSavedRange(r)
+  }
+
   // 图表 option（数据或主题变化时重建）
   const trendOpt = useMemo<EChartsOption | null>(() => {
     if (!data) return null
-    return trendOption(data.trend, tokens, range === 'today' ? 'today' : 'week')
-  }, [data, tokens, range])
+    return trendOption(
+      data.trend,
+      tokens,
+      range === 'today' ? 'today' : 'week',
+      trendGroup === 'agent'
+        ? {
+            colorOf: (key, i) => agentColors.get(key) ?? colorForIndex(tokens, i),
+            labelOf: (key) => agentLabels.get(key) ?? key
+          }
+        : undefined
+    )
+  }, [data, tokens, range, trendGroup, agentColors, agentLabels])
 
   const trendLegend = useMemo(() => {
     if (!data) return null
@@ -192,11 +272,18 @@ export default function App(): JSX.Element {
       for (const [k, v] of Object.entries(p.series)) totals.set(k, (totals.get(k) ?? 0) + v)
     }
     const names = [...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k]) => k)
-    const order = trendGroup === 'model' ? names : [...names].sort()
-    return order.map((n, i) => (
-      <LegendItem key={n} label={trendGroup === 'model' ? n : agentLabels.get(n) ?? n} color={colorForIndex(tokens, i)} />
+    return names.map((n, i) => (
+      <LegendItem
+        key={n}
+        label={trendGroup === 'model' ? n : agentLabels.get(n) ?? n}
+        color={
+          trendGroup === 'agent'
+            ? agentColors.get(n) ?? colorForIndex(tokens, i)
+            : colorForIndex(tokens, i)
+        }
+      />
     ))
-  }, [data, tokens, trendGroup, agentLabels])
+  }, [data, tokens, trendGroup, agentLabels, agentColors])
 
   const typeOpt = useMemo<EChartsOption | null>(() => {
     if (!data) return null
@@ -219,6 +306,45 @@ export default function App(): JSX.Element {
     const items = data.byAgent.map((a) => ({ name: a.name, value: a.tokens }))
     return donutOption(items, (name) => agentColors.get(name) ?? tokens.series[0], tokens)
   }, [data, tokens, agentColors])
+
+  // 单选某个 Agent 时，「Agent 占比」卡片自动切换为该 Agent 的「工作区/项目消耗排行」
+  const { projectBarOpt, projectDirByName } = useMemo(() => {
+    const dirMap = new Map<string, string>()
+    if (!data || !agent || data.sessions.length === 0) {
+      return { projectBarOpt: null, projectDirByName: dirMap }
+    }
+    const unassigned = t('chart.projectRank.unassigned')
+    const byProj = new Map<string, { tokens: number; requests: number; fullDir: string | null }>()
+    for (const s of data.sessions) {
+      if (s.tokens <= 0) continue
+      const label = shortDir(s.projectDir) || unassigned
+      const prev = byProj.get(label)
+      if (prev) {
+        prev.tokens += s.tokens
+        prev.requests += s.requests
+      } else {
+        byProj.set(label, { tokens: s.tokens, requests: s.requests, fullDir: s.projectDir })
+        if (s.projectDir) dirMap.set(label, s.projectDir)
+      }
+    }
+    const stats: NamedStat[] = [...byProj.entries()]
+      .map(([name, v]) => ({
+        name,
+        tokens: v.tokens,
+        requests: v.requests,
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0
+      }))
+      .sort((a, b) => b.tokens - a.tokens)
+      .slice(0, 8)
+    if (stats.length === 0) return { projectBarOpt: null, projectDirByName: dirMap }
+    return {
+      projectBarOpt: rankBarOption(stats, tokens, true, 'tokens'),
+      projectDirByName: dirMap
+    }
+  }, [data, agent, tokens])
 
   const modelBarOpt = useMemo<EChartsOption | null>(() => {
     if (!data || data.byModel.length === 0) return null
@@ -250,6 +376,7 @@ export default function App(): JSX.Element {
 
   return (
     <div className="flex h-full flex-col bg-background text-foreground">
+      <GlobalCursorMount />
       {/* 顶栏：自绘窗口控制钮（frame:false）——随主题 class 即时变色，无原生 WCO 同步问题。
           双击顶栏空白切换最大化。 */}
       <header
@@ -271,69 +398,110 @@ export default function App(): JSX.Element {
             <img src={nexusMark} alt="" className="h-auto w-4" draggable={false} />
           </span>
           <span className="text-ui-base font-medium">Nexus</span>
-          <span className="text-ui-sm text-foreground-subtlest">{t('app.subtitle')}</span>
+          <span className="hidden text-ui-sm text-foreground-subtlest xl:inline">{t('app.subtitle')}</span>
         </div>
+
+        {/* 一级视图切换：总控看板 ↔ 算力组网 Mesh */}
+        <nav
+          aria-label="Primary views"
+          style={{WebkitAppRegion: "no-drag"} as React.CSSProperties}
+          className="relative isolate flex h-7 items-center rounded-full bg-surface p-0.5"
+        >
+          <SlidingTabIndicator activeSelector='button[data-active="true"]' />
+          <button
+            type="button"
+            data-active={activeView === 'board' ? 'true' : undefined}
+            onClick={() => setActiveView('board')}
+            className={`relative z-10 flex h-6 cursor-pointer items-center gap-1.5 rounded-full px-2.5 text-ui-xs transition-colors duration-150 ${
+              activeView === 'board'
+                ? 'font-medium text-foreground'
+                : 'text-foreground-subtle hover:text-foreground'
+            }`}
+          >
+            <span>{t('nav.board')}</span>
+          </button>
+          <button
+            type="button"
+            data-active={activeView === 'mesh' ? 'true' : undefined}
+            onClick={() => setActiveView('mesh')}
+            className={`relative z-10 flex h-6 cursor-pointer items-center gap-1.5 rounded-full px-2.5 text-ui-xs transition-colors duration-150 ${
+              activeView === 'mesh'
+                ? 'font-medium text-foreground'
+                : 'text-foreground-subtle hover:text-foreground'
+            }`}
+          >
+            <MeshGlyph className="size-3.5 text-cobalt" />
+            <span>{t('nav.mesh')}</span>
+            {meshStatus && (
+              <span className="rounded-full bg-card px-1.5 font-mono text-[10px] leading-4 tabular-nums text-foreground-subtle">
+                {multiNode ? `${meshOnlineCount}/${meshStatus.nodes.length}` : meshOnlineCount}
+              </span>
+            )}
+          </button>
+        </nav>
         <div className="flex-1" style={{WebkitAppRegion: "no-drag"} as React.CSSProperties} />
         {sync.phase === 'running' && (
           <span className="text-ui-xs text-foreground-subtle">{t('header.syncing')}</span>
         )}
-        <div className="relative" style={{WebkitAppRegion: "no-drag"} as React.CSSProperties}>
-          <PillSwitcher
-            options={[
-              ...RANGE_OPTIONS.map((o) => ({ ...o, label: t(`range.${o.key}`) })),
-              { key: 'custom' as RangeKey, label: t('range.custom') }
-            ]}
-            value={range}
-            onChange={(r: RangeKey) => {
-              if (r === 'custom') {
-                // 打开自定义浮层（若已有自定义范围则直接沿用，浮层内可改）
-                setCustomPickerOpen(true)
-                return
-              }
-              useUi.getState().setRange(r)
-              void nexus.setSavedRange(r)
-            }}
-          />
-          {customPickerOpen && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => setCustomPickerOpen(false)} />
-              <div className="nx-fade-in absolute right-0 top-9 z-20 w-80 rounded-xl border border-border bg-card p-4">
-                <div className="mb-3 text-ui-base font-medium">{t('custom.title')}</div>
-                <label className="mb-1 block text-ui-xs text-foreground-subtle">{t('custom.start')}</label>
-                <input
-                  type="datetime-local"
-                  value={customFrom}
-                  onChange={(e) => setCustomFrom(e.target.value)}
-                  className="h-8 w-full rounded-lg border border-border bg-card px-2 font-mono text-ui-sm text-foreground"
-                />
-                <label className="mb-1 mt-3 block text-ui-xs text-foreground-subtle">{t('custom.end')}</label>
-                <input
-                  type="datetime-local"
-                  value={customTo}
-                  onChange={(e) => setCustomTo(e.target.value)}
-                  className="h-8 w-full rounded-lg border border-border bg-card px-2 font-mono text-ui-sm text-foreground"
-                />
-                <div className="mt-4 flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void applyCustomRange()}
-                    className="h-8 flex-1 rounded-lg bg-chart-1 px-2 text-ui-sm font-medium text-white transition-colors duration-150 hover:opacity-90"
-                  >
-                    {t('custom.apply')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setCustomPickerOpen(false)}
-                    className="h-8 flex-1 rounded-lg bg-secondary px-2 text-ui-sm text-foreground transition-colors duration-150 hover:bg-surface-hover"
-                  >
-                    {t('custom.cancel')}
-                  </button>
+        {activeView === 'board' && (
+          <div className="relative" style={{WebkitAppRegion: "no-drag"} as React.CSSProperties}>
+            <PillSwitcher
+              options={[
+                ...RANGE_OPTIONS.map((o) => ({ ...o, label: t(`range.${o.key}`) })),
+                { key: 'custom' as RangeKey, label: t('range.custom') }
+              ]}
+              value={range}
+              onChange={(r: RangeKey) => {
+                if (r === 'custom') {
+                  // 打开自定义浮层（若已有自定义范围则直接沿用，浮层内可改）
+                  setCustomPickerOpen(true)
+                  return
+                }
+                useUi.getState().setRange(r)
+                void nexus.setSavedRange(r)
+              }}
+            />
+            {customPickerOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setCustomPickerOpen(false)} />
+                <div className="nx-fade-in absolute right-0 top-9 z-20 w-80 rounded-xl border border-border bg-card p-4">
+                  <div className="mb-3 text-ui-base font-medium">{t('custom.title')}</div>
+                  <label className="mb-1 block text-ui-xs text-foreground-subtle">{t('custom.start')}</label>
+                  <input
+                    type="datetime-local"
+                    value={customFrom}
+                    onChange={(e) => setCustomFrom(e.target.value)}
+                    className="h-8 w-full rounded-lg border border-border bg-card px-2 font-mono text-ui-sm text-foreground"
+                  />
+                  <label className="mb-1 mt-3 block text-ui-xs text-foreground-subtle">{t('custom.end')}</label>
+                  <input
+                    type="datetime-local"
+                    value={customTo}
+                    onChange={(e) => setCustomTo(e.target.value)}
+                    className="h-8 w-full rounded-lg border border-border bg-card px-2 font-mono text-ui-sm text-foreground"
+                  />
+                  <div className="mt-4 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void applyCustomRange()}
+                      className="h-8 flex-1 rounded-lg bg-chart-1 px-2 text-ui-sm font-medium text-white transition-colors duration-150 hover:opacity-90"
+                    >
+                      {t('custom.apply')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCustomPickerOpen(false)}
+                      className="h-8 flex-1 rounded-lg bg-secondary px-2 text-ui-sm text-foreground transition-colors duration-150 hover:bg-surface-hover"
+                    >
+                      {t('custom.cancel')}
+                    </button>
+                  </div>
+                  <div className="mt-2 text-ui-xs text-foreground-subtlest">{t('custom.hint')}</div>
                 </div>
-                <div className="mt-2 text-ui-xs text-foreground-subtlest">{t('custom.hint')}</div>
-              </div>
-            </>
-          )}
-        </div>
+              </>
+            )}
+          </div>
+        )}
         <SystemPill />
         <AccountPanel />
         <IconButton style={{WebkitAppRegion: "no-drag"} as React.CSSProperties} title={t('header.action.syncNow')} onClick={() => void nexus.syncNow()} spinning={sync.phase === 'running'}>
@@ -345,6 +513,20 @@ export default function App(): JSX.Element {
         <IconButton style={{WebkitAppRegion: "no-drag"} as React.CSSProperties} title={t('header.action.exportPng')} onClick={() => void handleExport()}>
           <ExportIcon />
         </IconButton>
+        {activeView === 'board' && (
+          <button
+            type="button"
+            style={{WebkitAppRegion: "no-drag"} as React.CSSProperties}
+            title={t('header.action.sessions')}
+            onClick={() => setSessionsDrawerOpen((v) => !v)}
+            className="flex h-7 items-center gap-1 rounded-lg px-2 text-ui-xs text-foreground-subtle transition-colors duration-150 hover:bg-hover hover:text-foreground 2xl:hidden"
+          >
+            <span>{t('sessions.title')}</span>
+            <span className="rounded-full bg-surface px-1.5 font-mono text-[10px] tabular-nums text-foreground">
+              {data?.sessions.length ?? 0}
+            </span>
+          </button>
+        )}
         <IconButton style={{WebkitAppRegion: "no-drag"} as React.CSSProperties} title={t('header.action.settings')} onClick={() => void openSettings()}>
           <GearIcon />
         </IconButton>
@@ -353,7 +535,7 @@ export default function App(): JSX.Element {
           <>
             <div className="fixed inset-0 z-10" onClick={() => setSettingsOpen(false)} />
             <div
-              className="nx-fade-in absolute right-3 top-12 z-20 w-72 rounded-xl border border-border bg-card p-4"
+              className="nx-fade-in nx-card-elevated absolute right-3 top-12 z-20 max-h-[84vh] w-80 overflow-y-auto rounded-xl border border-border bg-card p-4"
               role="dialog"
             >
             <div className="mb-3 text-ui-base font-medium">{t('settings.title')}</div>
@@ -369,7 +551,37 @@ export default function App(): JSX.Element {
               <option value="zh-CN">{t('settings.lang.zh')}</option>
               <option value="en">{t('settings.lang.en')}</option>
             </select>
-            <label className="mb-1 mt-3 block text-ui-xs text-foreground-subtle">{t('settings.retention')}</label>
+            <label className="mb-1 mt-3 block text-ui-xs text-foreground-subtle">{t('settings.uiStyle')}</label>
+            <div className="relative isolate grid grid-cols-2 gap-1 rounded-lg border border-border bg-surface p-0.5">
+              <SlidingTabIndicator
+                activeSelector='button[data-active="true"]'
+                className="rounded-md bg-selected"
+              />
+              {(
+                [
+                  ['nexus', t('settings.uiStyle.nexus')],
+                  ['classic', t('settings.uiStyle.classic')]
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  data-active={uiStyle === id ? 'true' : undefined}
+                  onClick={() => void changeUiStyle(id)}
+                  className={`relative z-10 h-6 cursor-pointer rounded-md px-2 text-ui-xs transition-colors duration-150 ${
+                    uiStyle === id
+                      ? 'font-medium text-foreground'
+                      : 'text-foreground-subtle hover:text-foreground'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="my-3 h-px bg-hairline" />
+            <CursorSettingsSection />
+            <div className="my-3 h-px bg-hairline" />
+            <label className="mb-1 block text-ui-xs text-foreground-subtle">{t('settings.retention')}</label>
             <select
               value={retention}
               onChange={(e) => void changeRetention(Number(e.target.value))}
@@ -531,49 +743,163 @@ export default function App(): JSX.Element {
         )}
       </header>
 
-      {/* 三栏 */}
+      {/* 三栏看板 / 算力组网全画幅一级视图 */}
       <div className="flex min-h-0 flex-1 gap-1 p-1">
-        <AgentSidebar agents={agents} lastSyncAt={sync.finishedAt} />
+        {activeView === 'mesh' ? (
+          <MeshView
+            meshStatus={meshStatus}
+            actions={meshActions}
+            sessions={data?.sessions ?? []}
+            agentLabels={agentLabels}
+            onInspectNode={(nid) => {
+              setSelectedNodeId(nid)
+              setActiveView('board')
+            }}
+            onToast={setToast}
+          />
+        ) : (
+          <>
+            <AgentSidebar agents={agents} lastSyncAt={sync.finishedAt} />
 
-        <main
-          style={{ opacity: loading ? 0.55 : 1 }}
-          className="min-w-0 flex-1 space-y-4 overflow-y-auto rounded-xl border border-hairline bg-panel p-4 transition-opacity duration-150"
-        >
-          {!data ? (
+            <main
+              style={{ opacity: loading ? 0.55 : 1 }}
+              className="nx-shell-bg min-w-0 flex-1 space-y-4 overflow-y-auto rounded-xl border border-hairline bg-panel p-4 transition-opacity duration-150"
+            >
+              <NodeSwitcherBar
+                meshStatus={meshStatus}
+                selectedNodeId={selectedNodeId}
+                onSelectNode={setSelectedNodeId}
+                onOpenMeshView={() => setActiveView('mesh')}
+              />
+              {!data ? (
             <EmptyState title={t('empty.loading.title')} description={t('empty.loading.desc')} />
           ) : totalTokens === 0 && data.sessions.length === 0 ? (
-            <EmptyState
-              title={t('empty.noData.title')}
-              description={
-                agent
-                  ? t('empty.noData.filtered', {
-                      agent: agentLabels.get(agent) ?? agent,
-                      range: t(`range.${range}`)
-                    })
-                  : t('empty.noData.plain', { range: t(`range.${range}`) })
-              }
-            />
+            <div className="space-y-3">
+              <EmptyState
+                title={t('empty.noData.title')}
+                description={
+                  agent
+                    ? t('empty.noData.filtered', {
+                        agent: agentLabels.get(agent) ?? agent,
+                        range: t(`range.${range}`)
+                      })
+                    : t('empty.noData.plain', { range: t(`range.${range}`) })
+                }
+              />
+              {histTokens > 0 && range !== 'all' && (
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => switchRangeQuick('7d')}
+                    className="rounded-lg bg-surface px-3 py-1.5 text-ui-xs font-medium text-foreground transition-colors duration-150 hover:bg-hover"
+                  >
+                    {t('banner.switch7d')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => switchRangeQuick('30d')}
+                    className="rounded-lg bg-surface px-3 py-1.5 text-ui-xs font-medium text-foreground transition-colors duration-150 hover:bg-hover"
+                  >
+                    {t('banner.switch30d')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => switchRangeQuick('all')}
+                    className="rounded-lg bg-chart-1 px-3 py-1.5 text-ui-xs font-medium text-white transition-opacity duration-150 hover:opacity-90"
+                  >
+                    {t('banner.switchAll')} ({compactNumber(histTokens)})
+                  </button>
+                </div>
+              )}
+            </div>
           ) : (
             <>
+              {/* 当前时间范围无 Token 但历史有消耗时的智能引导横幅 */}
+              {totalTokens === 0 && histTokens > 0 && range !== 'all' && (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-surface px-4 py-2.5 text-ui-xs text-foreground-subtle">
+                  <span>
+                    {t('banner.rangeEmpty', {
+                      range: t(`range.${range}`),
+                      tokens: compactNumber(histTokens),
+                      last: relativeTime(histLastActive)
+                    })}
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    {range !== '7d' && (
+                      <button
+                        type="button"
+                        onClick={() => switchRangeQuick('7d')}
+                        className="rounded-md bg-raised px-2 py-1 text-ui-xs text-foreground transition-colors duration-150 hover:bg-hover"
+                      >
+                        {t('banner.switch7d')}
+                      </button>
+                    )}
+                    {range !== '30d' && (
+                      <button
+                        type="button"
+                        onClick={() => switchRangeQuick('30d')}
+                        className="rounded-md bg-raised px-2 py-1 text-ui-xs text-foreground transition-colors duration-150 hover:bg-hover"
+                      >
+                        {t('banner.switch30d')}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => switchRangeQuick('all')}
+                      className="rounded-md bg-chart-1 px-2.5 py-1 text-ui-xs font-medium text-white transition-opacity duration-150 hover:opacity-90"
+                    >
+                      {t('banner.switchAll')}
+                    </button>
+                  </span>
+                </div>
+              )}
               {/* KPI 矩阵 */}
               <div className="grid grid-cols-2 gap-4 2xl:grid-cols-4">
                 <KpiCard
                   label={t('kpi.tokens')}
+                  indexTag="01"
+                  accent="signal"
+                  progressPct={
+                    range !== 'all' && histTokens > 0
+                      ? (totalTokens / histTokens) * 100
+                      : totalTokens > 0
+                        ? 100
+                        : 0
+                  }
                   value={<AnimatedNumber num={totalTokens} />}
                   sub={t('kpi.tokens.sub', { tokens: fullNumber(totalTokens), n: data.overview.totals.requests })}
                 />
                 <KpiCard
                   label={t('kpi.sessions')}
+                  indexTag="02"
+                  accent="cobalt"
+                  progressPct={
+                    agents.length > 0
+                      ? (agents.filter((a) => (a.rangeTokens ?? a.todayTokens) > 0).length /
+                          agents.length) *
+                        100
+                      : 0
+                  }
                   value={<AnimatedNumber num={data.overview.sessionCount} />}
                   sub={t('kpi.sessions.sub', { n: data.overview.activeModels })}
                 />
                 <KpiCard
                   label={t('kpi.tools')}
+                  indexTag="03"
+                  accent="success"
+                  progressPct={
+                    data.tools.length && data.overview.toolCallCount > 0
+                      ? (data.tools[0].count / data.overview.toolCallCount) * 100
+                      : 0
+                  }
                   value={<AnimatedNumber num={data.overview.toolCallCount} />}
                   sub={data.tools.length ? t('kpi.tools.top', { tool: data.tools[0].tool }) : t('kpi.tools.none')}
                 />
                 <KpiCard
                   label={t('kpi.cost')}
+                  indexTag="04"
+                  accent="signal"
+                  progressPct={cacheHit ?? undefined}
                   value={
                     <AnimatedNumber
                       num={data.overview.totals.estimatedCostUsd}
@@ -630,10 +956,10 @@ export default function App(): JSX.Element {
                 </ChartCard>
               </div>
 
-              {/* Agent 占比 + 模型排行 */}
+              {/* Agent 占比（全局视图） / 工作区消耗排行（单 Agent 视图） + 模型排行 */}
               <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
                 <ChartCard
-                  title={t('chart.agentShare')}
+                  title={agent ? t('chart.projectRank') : t('chart.agentShare')}
                   actions={
                     agent ? (
                       <button
@@ -648,7 +974,20 @@ export default function App(): JSX.Element {
                     )
                   }
                 >
-                  {agentDonutOpt != null ? (
+                  {agent ? (
+                    projectBarOpt != null ? (
+                      <EChart
+                        option={projectBarOpt}
+                        className="h-60 w-full"
+                        onClick={(name) => {
+                          const dir = projectDirByName.get(name)
+                          if (dir) void nexus.openPath(dir).catch(() => undefined)
+                        }}
+                      />
+                    ) : (
+                      <EmptyState title={t('chart.empty.title')} description={t('chart.projectRank.empty.desc')} />
+                    )
+                  ) : agentDonutOpt != null ? (
                     <>
                       <EChart
                         option={agentDonutOpt}
@@ -711,11 +1050,35 @@ export default function App(): JSX.Element {
               )}
             </>
           )}
-        </main>
+            </main>
 
-        <div className="hidden 2xl:flex">
-          <SessionsPanel sessions={data?.sessions ?? []} agentColors={agentColors} />
-        </div>
+            <div className="hidden 2xl:flex">
+              <SessionsPanel
+                sessions={data?.sessions ?? []}
+                agentColors={agentColors}
+                nodeMetaById={nodeMetaById}
+                multiNode={multiNode}
+              />
+            </div>
+            {sessionsDrawerOpen && (
+              <div className="fixed inset-0 z-30 flex justify-end 2xl:hidden">
+                <div
+                  className="fixed inset-0 bg-black/40"
+                  onClick={() => setSessionsDrawerOpen(false)}
+                />
+                <div className="nx-fade-in relative z-10 h-full border-l border-border shadow-xl">
+                  <SessionsPanel
+                    sessions={data?.sessions ?? []}
+                    agentColors={agentColors}
+                    nodeMetaById={nodeMetaById}
+                    multiNode={multiNode}
+                    onClose={() => setSessionsDrawerOpen(false)}
+                  />
+                </div>
+              </div>
+            )}
+          </>
+        )}
       </div>
 
       {/* Toast */}

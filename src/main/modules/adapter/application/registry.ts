@@ -21,6 +21,7 @@ import { MuseAdapter } from '../infrastructure/muse'
 import { ClineAdapter, KiloCodeAdapter, RooCodeAdapter } from '../infrastructure/cline'
 import { GeminiCliAdapter } from '../infrastructure/gemini-cli'
 import { QwenAdapter } from '../infrastructure/qwen'
+import { QoderAdapter } from '../infrastructure/qoder'
 
 export function createAdapters(store: StoreWriter): AgentAdapter[] {
   return [
@@ -33,6 +34,7 @@ export function createAdapters(store: StoreWriter): AgentAdapter[] {
     new ReasonixAdapter(store),
     new OpencodeAdapter(store),
     new WorkBuddyAdapter(store),
+    new QoderAdapter(store),
     new MimoAdapter(store),
     new MuseAdapter(store),
     new ClineAdapter(store),
@@ -44,17 +46,7 @@ export function createAdapters(store: StoreWriter): AgentAdapter[] {
 }
 
 export const PRESENCE_ONLY_AGENTS: PresenceOnlyAgent[] = [
-  // workbuddy 已升级为真实适配器（~/.workbuddy-ai 转录/traces/workbuddy.db），不再 presence-only
-  {
-    id: 'qoder',
-    label: 'Qoder',
-    detectPaths: [
-      join(homedir(), '.qoder'),
-      join(process.env.APPDATA ?? '', 'com.qodercn.app.stable')
-    ],
-    note: '会话历史存云端'
-  },
-  // reasonix 已升级为真实适配器（stats/每日.jsonl 请求级用量），不再 presence-only
+  // workbuddy、reasonix、qoder 均已升级为真实适配器，不再 presence-only
   {
     id: 'trae',
     label: 'Trae',

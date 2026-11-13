@@ -39,6 +39,10 @@ interface WbLine {
   id?: string
   timestamp?: number
   type?: string
+  name?: string
+  callId?: string
+  aiTitle?: string
+  cwd?: string
   providerData?: { model?: string; usage?: WbUsage }
   message?: { usage?: Record<string, number> }
   sessionId?: string
@@ -137,12 +141,22 @@ export class WorkBuddyAdapter implements AgentAdapter {
       return { records: 0, sessions: 0, tools: 0, lastTs: ctx.state.lastTs, meta: ctx.state.meta }
     }
     const stamps = stampsFrom(ctx.state.meta)
+    const jsonlOffsets: Record<string, number> = {
+      ...((ctx.state.meta.jsonlOffsetsV2 as Record<string, number> | undefined) ?? {})
+    }
     let records = 0
     let sessions = 0
+    let tools = 0
 
-    // 1) CLI 转录 jsonl（逐请求，带模型）
+    // 1) CLI 转录 jsonl（逐请求，带模型与 function_call 工具调用）
     const usageRows: Parameters<StoreWriter['insertUsage']>[0] = []
+    const toolRows: Parameters<StoreWriter['insertToolCalls']>[0] = []
     const transcriptSessions = new Set<string>()
+    const sessionModels = new Map<string, string>()
+    const sessionTitles = new Map<string, string>()
+    const sessionCwds = new Map<string, string>()
+    const sessionBounds = new Map<string, { min: number; max: number }>()
+
     for (const dir of jsonlDirs()) {
       let workspaces: string[] = []
       try {
@@ -168,14 +182,20 @@ export class WorkBuddyAdapter implements AgentAdapter {
             continue
           }
           const stampKey = path
-          const prevOffset = (ctx.state.meta.jsonlOffsets as Record<string, number> | undefined)?.[stampKey] ?? 0
+          const prevOffset = jsonlOffsets[stampKey] ?? 0
           // 转录为追加写；mtime 变化但 offset 已到末尾则跳过（半行处理在 readAppended 内）
           const appended = readAppended(path, prevOffset)
           if (!appended || !appended.text) {
-            if (appended) stamps.set(stampKey, { m: st.mtimeMs, s: st.size })
+            if (appended) {
+              stamps.set(stampKey, { m: st.mtimeMs, s: st.size })
+              jsonlOffsets[stampKey] = appended.consumed
+            }
             continue
           }
+          const fallbackSid = file.replace(/\.jsonl$/i, '')
+          let lineIdx = 0
           for (const line of appended.text.split('\n')) {
+            const idx = lineIdx++
             if (!line.trim()) continue
             let o: WbLine
             try {
@@ -183,10 +203,43 @@ export class WorkBuddyAdapter implements AgentAdapter {
             } catch {
               continue
             }
-            if (typeof o.sessionId === 'string' && o.sessionId) transcriptSessions.add(o.sessionId)
+            const sid = typeof o.sessionId === 'string' && o.sessionId ? o.sessionId : fallbackSid
+            transcriptSessions.add(sid)
+            if (typeof o.cwd === 'string' && o.cwd && !sessionCwds.has(sid)) {
+              sessionCwds.set(sid, o.cwd)
+            }
+            if (o.type === 'ai-title' && typeof o.aiTitle === 'string' && o.aiTitle.trim()) {
+              sessionTitles.set(sid, o.aiTitle.trim().slice(0, 120))
+            }
             const ts = typeof o.timestamp === 'number' ? o.timestamp : null
-            if (ts == null) continue
+            if (ts != null && ts > 0) {
+              const b = sessionBounds.get(sid)
+              if (!b) sessionBounds.set(sid, { min: ts, max: ts })
+              else {
+                if (ts < b.min) b.min = ts
+                if (ts > b.max) b.max = ts
+              }
+            }
             let model: string | null = o.providerData?.model ?? null
+            if (model) sessionModels.set(sid, model)
+
+            if (o.type === 'function_call' && typeof o.name === 'string' && o.name) {
+              const callKey =
+                typeof o.callId === 'string' && o.callId
+                  ? o.callId
+                  : typeof o.id === 'string' && o.id
+                    ? o.id
+                    : `${prevOffset}:${idx}`
+              toolRows.push({
+                agent: this.id,
+                toolName: o.name.slice(0, 200),
+                ts,
+                sessionId: sid,
+                dedupeKey: `workbuddy:tool:${sid}:${callKey}`
+              })
+            }
+
+            if (ts == null) continue
             let input: number | null = null
             let output: number | null = null
             let cacheRead = 0
@@ -209,7 +262,7 @@ export class WorkBuddyAdapter implements AgentAdapter {
             const out = output ?? 0
             const inputNonCache = Math.max(0, input - cacheRead)
             if (inputNonCache + out <= 0) continue
-            if (!model) model = 'unknown'
+            if (!model) model = sessionModels.get(sid) ?? 'unknown'
             usageRows.push({
               agent: this.id,
               model,
@@ -220,16 +273,18 @@ export class WorkBuddyAdapter implements AgentAdapter {
               reasoningTokens: 0, // reasoning ⊆ output（实测 total=input+output）
               cacheReadTokens: cacheRead,
               cacheWriteTokens: 0,
-              sessionId: o.sessionId ?? null,
+              sessionId: sid,
               dedupeKey: `workbuddy:line:${o.id ?? `${ts}:${input}:${output}`}`,
               isEstimated: false
             })
           }
           stamps.set(stampKey, { m: st.mtimeMs, s: st.size })
+          jsonlOffsets[stampKey] = appended.consumed
         }
       }
     }
     if (usageRows.length > 0) records = this.store.insertUsage(usageRows)
+    if (toolRows.length > 0) tools = this.store.insertToolCalls(toolRows)
 
     // 2) traces 兜底（仅转录未覆盖的 sessionId）
     const traceRows: Parameters<StoreWriter['insertUsage']>[0] = []
@@ -317,17 +372,31 @@ export class WorkBuddyAdapter implements AgentAdapter {
             for (const r of rows) {
               const id = typeof r.id === 'string' ? r.id : null
               if (!id) continue
-              const title = [r.custom_title, r.title].find(
+              const title = [r.custom_title, r.title, sessionTitles.get(id)].find(
                 (v): v is string => typeof v === 'string' && v.length > 0
               )
+              const model =
+                typeof r.model === 'string' && r.model
+                  ? r.model
+                  : sessionModels.get(id) ?? null
+              const cwd =
+                typeof r.cwd === 'string' && r.cwd
+                  ? r.cwd
+                  : sessionCwds.get(id) ?? null
               sRows.push({
                 agent: this.id,
                 sessionId: id,
                 title: title ?? null,
-                projectDir: typeof r.cwd === 'string' ? r.cwd : null,
-                model: typeof r.model === 'string' ? r.model : null,
-                startedAt: typeof r.created_at === 'number' ? r.created_at : null,
-                updatedAt: typeof r.updated_at === 'number' ? r.updated_at : null
+                projectDir: cwd,
+                model,
+                startedAt:
+                  typeof r.created_at === 'number'
+                    ? r.created_at
+                    : sessionBounds.get(id)?.min ?? null,
+                updatedAt:
+                  typeof r.updated_at === 'number'
+                    ? r.updated_at
+                    : sessionBounds.get(id)?.max ?? null
               })
             }
             if (sRows.length > 0) sessions = this.store.upsertSessions(sRows)
@@ -342,14 +411,12 @@ export class WorkBuddyAdapter implements AgentAdapter {
 
     const fileStamps: Record<string, FileStamp> = {}
     for (const [k, v] of stamps) fileStamps[k] = v
-    const jsonlOffsets: Record<string, number> = {}
-    for (const [k, v] of stamps) jsonlOffsets[k] = v.s
     return {
       records,
       sessions,
-      tools: 0,
+      tools,
       lastTs: ctx.now,
-      meta: { ...ctx.state.meta, fileStamps, jsonlOffsets }
+      meta: { ...ctx.state.meta, fileStamps, jsonlOffsetsV2: jsonlOffsets }
     }
   }
 }

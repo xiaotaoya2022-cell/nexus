@@ -13,6 +13,9 @@ export interface ChartTokens {
   hairline: string
   border: string
   card: string
+  signal: string
+  cobalt: string
+  nexus: boolean
   series: string[]
   /** 热力五档（含空档）：echarts 无法解析 color-mix()，直接按主题给出 rgba 串 */
   heat: string[]
@@ -32,11 +35,27 @@ const HEAT_LIGHT = [
   'rgba(11,127,255,0.66)',
   'rgba(11,127,255,0.85)'
 ]
+const HEAT_NEXUS_DARK = [
+  'rgba(235,241,255,0.045)',
+  'rgba(239,75,30,0.24)',
+  'rgba(239,75,30,0.44)',
+  'rgba(239,75,30,0.68)',
+  '#ef4b1e'
+]
+const HEAT_NEXUS_LIGHT = [
+  'rgba(23,25,30,0.055)',
+  'rgba(227,66,22,0.22)',
+  'rgba(227,66,22,0.42)',
+  'rgba(227,66,22,0.68)',
+  '#e34216'
+]
 
 export function chartTokens(): ChartTokens {
-  const cs = getComputedStyle(document.documentElement)
+  const root = document.documentElement
+  const cs = getComputedStyle(root)
   const v = (name: string): string => cs.getPropertyValue(name).trim()
-  const light = document.documentElement.classList.contains('theme-light')
+  const light = root.classList.contains('theme-light')
+  const nexus = root.classList.contains('style-nexus')
   return {
     fg: v('--nx-foreground'),
     fgSubtle: v('--nx-foreground-subtle'),
@@ -44,8 +63,11 @@ export function chartTokens(): ChartTokens {
     hairline: v('--nx-hairline'),
     border: v('--nx-border'),
     card: v('--nx-card'),
+    signal: v('--nx-signal') || v('--nx-chart-1'),
+    cobalt: v('--nx-cobalt') || v('--nx-chart-1'),
+    nexus,
     series: [1, 2, 3, 4, 5, 6].map((i) => v(`--nx-chart-${i}`)),
-    heat: light ? HEAT_LIGHT : HEAT_DARK
+    heat: nexus ? (light ? HEAT_NEXUS_LIGHT : HEAT_NEXUS_DARK) : light ? HEAT_LIGHT : HEAT_DARK
   }
 }
 
@@ -54,10 +76,23 @@ const MONO =
 
 const AXIS_LABEL = { fontSize: 10, fontFamily: MONO }
 
+function withAlpha(color: string, alpha: number): string | undefined {
+  const m = /^#([0-9a-f]{6})$/i.exec(color.trim())
+  if (!m) return undefined
+  const hex = m[1]
+  const r = parseInt(hex.slice(0, 2), 16)
+  const g = parseInt(hex.slice(2, 4), 16)
+  const b = parseInt(hex.slice(4, 6), 16)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
 function baseTooltip(): EChartsOption['tooltip'] {
+  const nexus = document.documentElement.classList.contains('style-nexus')
   return {
     // tooltip 是渲染在图表容器 DOM 上的元素，extraCssText 中可用 CSS 变量
-    extraCssText: `background: var(--nx-card); border: 1px solid var(--nx-border); border-radius: 8px; box-shadow: none; color: var(--nx-foreground); font-size: 12px;`
+    extraCssText: nexus
+      ? `background: var(--nx-card); border: 1px solid var(--nx-border-hover); border-radius: 10px; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22); color: var(--nx-foreground); font-size: 12px; padding: 8px 10px;`
+      : `background: var(--nx-card); border: 1px solid var(--nx-border); border-radius: 8px; box-shadow: none; color: var(--nx-foreground); font-size: 12px;`
   }
 }
 
@@ -97,7 +132,11 @@ function fixedUnitFormatter(points: Array<{ total: number }>): (v: number) => st
 export function trendOption(
   points: TrendPoint[],
   tokens: ChartTokens,
-  range: 'today' | 'week' | 'month' | 'all'
+  range: 'today' | 'week' | 'month' | 'all',
+  opts?: {
+    colorOf?: (key: string, i: number) => string
+    labelOf?: (key: string) => string
+  }
 ): EChartsOption {
   const totalsByKey = new Map<string, number>()
   for (const p of points) {
@@ -136,17 +175,40 @@ export function trendOption(
       },
       splitLine: { lineStyle: { color: tokens.hairline, type: 'dashed' } }
     },
-    series: topKeys.map((key, i) => ({
-      name: key,
-      type: 'line' as const,
-      data: points.map((p) => p.series[key] ?? 0),
-      smooth: false,
-      symbol: 'none',
-      lineStyle: { width: 2, color: colorForIndex(tokens, i) },
-      itemStyle: { color: colorForIndex(tokens, i) },
-      emphasis: { focus: 'series' as const },
-      triggerLineEvent: false
-    }))
+    series: topKeys.map((key, i) => {
+      const color = opts?.colorOf ? opts.colorOf(key, i) : colorForIndex(tokens, i)
+      const label = opts?.labelOf ? opts.labelOf(key) : key
+      const areaTop = tokens.nexus && i === 0 ? withAlpha(color, 0.18) : undefined
+      const areaBottom = tokens.nexus && i === 0 ? withAlpha(color, 0) : undefined
+      return {
+        name: label,
+        type: 'line' as const,
+        data: points.map((p) => p.series[key] ?? 0),
+        smooth: tokens.nexus ? 0.22 : false,
+        symbol: 'none',
+        lineStyle: { width: tokens.nexus && i === 0 ? 2.25 : 2, color },
+        itemStyle: { color },
+        ...(areaTop && areaBottom
+          ? {
+              areaStyle: {
+                color: {
+                  type: 'linear' as const,
+                  x: 0,
+                  y: 0,
+                  x2: 0,
+                  y2: 1,
+                  colorStops: [
+                    { offset: 0, color: areaTop },
+                    { offset: 1, color: areaBottom }
+                  ]
+                }
+              }
+            }
+          : {}),
+        emphasis: { focus: 'series' as const },
+        triggerLineEvent: false
+      }
+    })
   }
 }
 
@@ -202,7 +264,7 @@ export function heatmapOption(data: HeatmapData, tokens: ChartTokens): EChartsOp
         name: 'tokens',
         type: 'heatmap',
         data: grid,
-        itemStyle: { borderColor: tokens.card, borderWidth: 2, borderRadius: 3 },
+        itemStyle: { borderColor: tokens.card, borderWidth: 2, borderRadius: tokens.nexus ? 4 : 3 },
         emphasis: { itemStyle: { borderColor: tokens.border } }
       }
     ]
@@ -229,7 +291,7 @@ export function donutOption(
         center: ['50%', '50%'],
         avoidLabelOverlap: true,
         padAngle: 2,
-        itemStyle: { borderColor: tokens.card, borderWidth: 2, borderRadius: 3 },
+        itemStyle: { borderColor: tokens.card, borderWidth: 2, borderRadius: tokens.nexus ? 4 : 3 },
         label: { show: false },
         emphasis: {
           scaleSize: 3,
@@ -346,7 +408,7 @@ export function dailyBarOption(
         type: 'bar',
         data: points.map((p) => p.total),
         barMaxWidth: 18,
-        itemStyle: { color: tokens.series[0], borderRadius: [3, 3, 0, 0] }
+        itemStyle: { color: tokens.series[0], borderRadius: tokens.nexus ? [4, 4, 0, 0] : [3, 3, 0, 0] }
       }
     ]
   }

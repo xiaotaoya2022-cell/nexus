@@ -1,12 +1,12 @@
 // preload：以最小暴露面把 IPC 通道桥接为 window.nexus（contextIsolation 安全）。
 
 import { contextBridge, ipcRenderer } from 'electron'
-import type { NexusApi, Settings, SyncProgress } from '@shared/types'
+import type { MeshStatusInfo, NexusApi, Settings, SyncProgress, UiStyle } from '@shared/types'
 
 const api: NexusApi = {
   getOverview: (range, agent) => ipcRenderer.invoke('nexus:getOverview', range, agent),
-  getBoard: (range, agent, customStart?: number, customEnd?: number) =>
-    ipcRenderer.invoke('nexus:getBoard', range, agent, customStart, customEnd),
+  getBoard: (range, agent, customStart?: number, customEnd?: number, nodeId?: string | null) =>
+    ipcRenderer.invoke('nexus:getBoard', range, agent, customStart, customEnd, nodeId),
   getCustomRange: () => ipcRenderer.invoke('nexus:getCustomRange'),
   setCustomRange: (start: number, end: number) =>
     ipcRenderer.invoke('nexus:setCustomRange', start, end),
@@ -29,12 +29,26 @@ const api: NexusApi = {
   getHeatmap: (range, agent) => ipcRenderer.invoke('nexus:getHeatmap', range, agent),
   getCalendar: (range, agent) => ipcRenderer.invoke('nexus:getCalendar', range, agent),
   getToolStats: (range, agent) => ipcRenderer.invoke('nexus:getToolStats', range, agent),
-  getAgents: () => ipcRenderer.invoke('nexus:getAgents'),
+  getAgents: (range, customStart, customEnd, nodeId) =>
+    ipcRenderer.invoke('nexus:getAgents', range, customStart, customEnd, nodeId),
   getSessions: (range, agent, limit) => ipcRenderer.invoke('nexus:getSessions', range, agent, limit),
+  getMeshStatus: () => ipcRenderer.invoke('nexus:getMeshStatus'),
+  setLocalNodeAlias: (alias) => ipcRenderer.invoke('nexus:setLocalNodeAlias', alias),
+  setLocalNodeRole: (role) => ipcRenderer.invoke('nexus:setLocalNodeRole', role),
+  pairWithHub: (input) => ipcRenderer.invoke('nexus:pairWithHub', input),
+  disconnectHub: () => ipcRenderer.invoke('nexus:disconnectHub'),
+  triggerMeshSync: () => ipcRenderer.invoke('nexus:triggerMeshSync'),
+  removeMeshNode: (nodeId) => ipcRenderer.invoke('nexus:removeMeshNode', nodeId),
+  onMeshUpdate: (cb: (status: MeshStatusInfo) => void) => {
+    const listener = (_e: unknown, status: MeshStatusInfo): void => cb(status)
+    ipcRenderer.on('nexus:mesh-update', listener)
+    return () => ipcRenderer.removeListener('nexus:mesh-update', listener)
+  },
   getSyncStatus: () => ipcRenderer.invoke('nexus:getSyncStatus'),
   syncNow: () => ipcRenderer.invoke('nexus:syncNow'),
   getSettings: () => ipcRenderer.invoke('nexus:getSettings'),
   setTheme: (theme: Settings['theme']) => ipcRenderer.invoke('nexus:setTheme', theme),
+  setUiStyle: (style: UiStyle) => ipcRenderer.invoke('nexus:setUiStyle', style),
   getRetentionDays: () => ipcRenderer.invoke('nexus:getRetentionDays'),
   setRetentionDays: (days: number) => ipcRenderer.invoke('nexus:setRetentionDays', days),
   getDataDir: () => ipcRenderer.invoke('nexus:getDataDir'),

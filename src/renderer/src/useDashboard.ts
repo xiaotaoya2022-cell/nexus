@@ -37,6 +37,7 @@ export function useDashboard(): {
 } {
   const range = useUi((s) => s.range)
   const agent = useUi((s) => s.agent)
+  const selectedNodeId = useUi((s) => s.selectedNodeId)
   const customRange = useUi((s) => s.customRange)
   const [data, setData] = useState<DashboardData | null>(null)
   const [agents, setAgents] = useState<AgentInfo[]>([])
@@ -54,8 +55,8 @@ export function useDashboard(): {
     try {
       const custom = range === 'custom' && customRange ? customRange : undefined
       const [board, agentInfos] = await Promise.all([
-        nexus.getBoard(range, agent, custom?.start, custom?.end),
-        nexus.getAgents()
+        nexus.getBoard(range, agent, custom?.start, custom?.end, selectedNodeId),
+        nexus.getAgents(range, custom?.start, custom?.end, selectedNodeId)
       ])
       if (seq !== reloadSeq.current) return // 过期响应丢弃（竞态守卫）
       trendRef.current = board
@@ -73,7 +74,7 @@ export function useDashboard(): {
     } finally {
       if (seq === reloadSeq.current) setLoading(false)
     }
-  }, [range, agent, trendGroup, customRange])
+  }, [range, agent, selectedNodeId, trendGroup, customRange])
 
   // 切换趋势分组：数据已在手，仅重选 series，零查询
   useEffect(() => {
@@ -97,11 +98,25 @@ export function useDashboard(): {
 
   useEffect(() => {
     void nexus.getSyncStatus().then((p) => useUi.getState().setSync(p))
-    const unsub = nexus.onSyncProgress((p) => {
+    const unsubSync = nexus.onSyncProgress((p) => {
       useUi.getState().setSync(p)
       if (p.phase === 'done') void reloadRef.current()
     })
-    return unsub
+    let lastMeshRecordsSig: string | null = null
+    const unsubMesh = nexus.onMeshUpdate((status) => {
+      const sig = status.nodes
+        .filter((n) => !n.isLocal)
+        .map((n) => `${n.nodeId}:${n.recordCount}:${n.totalTokens}`)
+        .join('|')
+      if (lastMeshRecordsSig !== null && sig !== lastMeshRecordsSig) {
+        void reloadRef.current()
+      }
+      lastMeshRecordsSig = sig
+    })
+    return () => {
+      unsubSync()
+      unsubMesh()
+    }
   }, [])
 
   return { data, agents, loading, trendGroup, setTrendGroup, reload }

@@ -15,6 +15,8 @@ import type { DshBridge } from '../modules/dsh/bridge'
 import type { CockpitBridge } from '../modules/cockpit/bridge'
 import type { QuotaEngine } from '../modules/quotas/engine'
 import type { RemoteServer } from '../modules/remote/server'
+import type { MeshService } from '../modules/mesh/service'
+import type { MeshStatusInfo, NodeRole } from '@shared/types'
 import { rangeStartMs } from '../modules/aggregator/application/query-service'
 import { TOTAL_EXPR } from '../modules/aggregator/infrastructure/store'
 
@@ -33,47 +35,97 @@ export interface IpcDeps {
   cockpit: CockpitBridge
   quota: QuotaEngine
   remote: RemoteServer
+  mesh?: MeshService
   getMainWindow: () => BrowserWindow | null
 }
 
-function buildAgentInfos(deps: IpcDeps): AgentInfo[] {
+function resolveNodeFilter(store: NexusStore, nodeId?: string | null): string | null {
+  if (!nodeId || nodeId === 'all') return null
+  const localId = store.getSetting('meshNodeId') ?? 'local'
+  return nodeId === 'local' || nodeId === localId ? 'local' : nodeId
+}
+
+function buildAgentInfos(
+  deps: IpcDeps,
+  range: RangeKey = 'today',
+  custom?: { start: number; end: number },
+  nodeId: string | null = null
+): AgentInfo[] {
   const now = Date.now()
   const todayStart = rangeStartMs('today', now)
+  const nodeFilter = resolveNodeFilter(deps.store, nodeId)
+  const isRemoteOnly = nodeFilter != null && nodeFilter !== 'local'
+  const remoteActiveAgents = new Set<string>()
+  for (const n of deps.store.listMeshNodeRecords()) {
+    if (!nodeFilter || n.nodeId === nodeFilter) {
+      for (const ag of n.activeAgents) remoteActiveAgents.add(ag)
+    }
+  }
   const known = new Map<string, { label: string; note: string | null }>()
   for (const a of deps.adapters) known.set(a.id, { label: a.label, note: null })
   for (const p of deps.presence) known.set(p.id, { label: p.label, note: p.note })
 
   const todayByAgent = new Map<string, { tokens: number; requests: number }>()
   {
-    const rows = deps.store.db
-      .prepare(
-        `SELECT agent, SUM(input_tokens+output_tokens+reasoning_tokens+cache_read_tokens+cache_write_tokens) t,
-                COALESCE(SUM(requests), COUNT(*)) n FROM usage_records WHERE ts >= ? GROUP BY agent`
-      )
-      .all(todayStart) as Array<Record<string, unknown>>
+    const sql = `SELECT agent, SUM(input_tokens+output_tokens+reasoning_tokens+cache_read_tokens+cache_write_tokens) t,
+                 COALESCE(SUM(requests), COUNT(*)) n FROM usage_records
+                 WHERE ts >= ? ${nodeFilter ? 'AND source_node_id = ?' : ''} GROUP BY agent`
+    const rows = (
+      nodeFilter
+        ? deps.store.db.prepare(sql).all(todayStart, nodeFilter)
+        : deps.store.db.prepare(sql).all(todayStart)
+    ) as Array<Record<string, unknown>>
     for (const r of rows) {
       todayByAgent.set(String(r.agent), { tokens: Number(r.t) || 0, requests: Number(r.n) || 0 })
     }
   }
-  const activity = new Map<string, { last: number | null; sessions: number }>()
+  const activity = new Map<string, { last: number | null; sessions: number; tokens: number }>()
   {
-    const rows = deps.store.db
-      .prepare(
-        `SELECT agent, MAX(ts) last, COUNT(DISTINCT session_id) s FROM usage_records GROUP BY agent`
-      )
-      .all() as Array<Record<string, unknown>>
+    const sql = `SELECT agent, MAX(ts) last, COUNT(DISTINCT session_id) s,
+                 SUM(input_tokens+output_tokens+reasoning_tokens+cache_read_tokens+cache_write_tokens) t
+                 FROM usage_records ${nodeFilter ? 'WHERE source_node_id = ?' : ''} GROUP BY agent`
+    const rows = (
+      nodeFilter ? deps.store.db.prepare(sql).all(nodeFilter) : deps.store.db.prepare(sql).all()
+    ) as Array<Record<string, unknown>>
     for (const r of rows) {
       activity.set(String(r.agent), {
         last: r.last == null ? null : Number(r.last),
-        sessions: Number(r.s) || 0
+        sessions: Number(r.s) || 0,
+        tokens: Number(r.t) || 0
       })
+    }
+  }
+  const rangeByAgent = new Map<string, number>()
+  if (range === 'today' && !custom) {
+    for (const [k, v] of todayByAgent) rangeByAgent.set(k, v.tokens)
+  } else if (range === 'all' && !custom) {
+    for (const [k, v] of activity) rangeByAgent.set(k, v.tokens)
+  } else {
+    const since = custom ? custom.start : rangeStartMs(range, now)
+    let until = custom ? custom.end : now
+    if (!custom && range === 'yesterday') {
+      const d = new Date(now)
+      d.setHours(0, 0, 0, 0)
+      until = d.getTime()
+    }
+    const sql = `SELECT agent, SUM(input_tokens+output_tokens+reasoning_tokens+cache_read_tokens+cache_write_tokens) t
+                 FROM usage_records WHERE ts >= ? AND ts <= ? ${nodeFilter ? 'AND source_node_id = ?' : ''} GROUP BY agent`
+    const rows = (
+      nodeFilter
+        ? deps.store.db.prepare(sql).all(since, until, nodeFilter)
+        : deps.store.db.prepare(sql).all(since, until)
+    ) as Array<Record<string, unknown>>
+    for (const r of rows) {
+      rangeByAgent.set(String(r.agent), Number(r.t) || 0)
     }
   }
   const sessionOnly = new Map<string, { last: number | null; sessions: number }>()
   {
-    const rows = deps.store.db
-      .prepare(`SELECT agent, MAX(COALESCE(updated_at, started_at, 0)) last, COUNT(*) s FROM sessions GROUP BY agent`)
-      .all() as Array<Record<string, unknown>>
+    const sql = `SELECT agent, MAX(COALESCE(updated_at, started_at, 0)) last, COUNT(*) s
+                 FROM sessions ${nodeFilter ? 'WHERE source_node_id = ?' : ''} GROUP BY agent`
+    const rows = (
+      nodeFilter ? deps.store.db.prepare(sql).all(nodeFilter) : deps.store.db.prepare(sql).all()
+    ) as Array<Record<string, unknown>>
     for (const r of rows) {
       sessionOnly.set(String(r.agent), {
         last: Number(r.last) || null,
@@ -82,18 +134,20 @@ function buildAgentInfos(deps: IpcDeps): AgentInfo[] {
     }
   }
 
-  // 会话数：sessions 表与 usage_records 去重会话的「并集」计数，避免双计（红队 N-02）
+  // 会话数：sessions 表与 usage_records 去重会话的「并集」计数，按 (source_node_id, agent, session_id) 防跨机碰撞
   const sessionUnion = new Map<string, number>()
   {
-    const rows = deps.store.db
-      .prepare(
-        `SELECT agent, COUNT(*) c FROM (
-           SELECT agent, session_id FROM sessions
-           UNION
-           SELECT agent, session_id FROM usage_records WHERE session_id IS NOT NULL
-         ) GROUP BY agent`
-      )
-      .all() as Array<Record<string, unknown>>
+    const sql = `SELECT agent, COUNT(*) c FROM (
+                   SELECT source_node_id, agent, session_id FROM sessions ${nodeFilter ? 'WHERE source_node_id = ?' : ''}
+                   UNION
+                   SELECT source_node_id, agent, session_id FROM usage_records
+                   WHERE session_id IS NOT NULL ${nodeFilter ? 'AND source_node_id = ?' : ''}
+                 ) GROUP BY agent`
+    const rows = (
+      nodeFilter
+        ? deps.store.db.prepare(sql).all(nodeFilter, nodeFilter)
+        : deps.store.db.prepare(sql).all()
+    ) as Array<Record<string, unknown>>
     for (const r of rows) {
       sessionUnion.set(String(r.agent), Number(r.c) || 0)
     }
@@ -104,13 +158,27 @@ function buildAgentInfos(deps: IpcDeps): AgentInfo[] {
   const infos: AgentInfo[] = []
   for (const [id, meta] of known) {
     const adapter = deps.adapters.find((a) => a.id === id)
-    const detected = adapter ? adapter.detect() : detectPresence(deps.presence.find((p) => p.id === id)?.detectPaths ?? [])
-    // Antigravity：接入 Cockpit 感知——把"如何启用采集"写进 note（调研报告 §落地建议）
-    const cockpitNote = id === 'antigravity' ? deps.cockpit.noteFor() : null
+    const localDetected = adapter
+      ? adapter.detect()
+      : detectPresence(deps.presence.find((p) => p.id === id)?.detectPaths ?? [])
+    const detected = isRemoteOnly
+      ? remoteActiveAgents.has(id)
+      : nodeFilter === 'local'
+        ? localDetected
+        : localDetected || remoteActiveAgents.has(id)
+    const today = todayByAgent.get(id)
+    const act = activity.get(id)
+    const so = sessionOnly.get(id)
+    const last = act?.last ?? so?.last ?? null
+    const sessions = sessionUnion.get(id) ?? 0
+    // Antigravity：原生日志已可直接采集；仅当本地无任何原生用量或会话记录时才用 Cockpit 提示兜底
+    const cockpitNote =
+      !isRemoteOnly && id === 'antigravity' && !today && !act && sessions === 0
+        ? deps.cockpit.noteFor()
+        : null
     let note = cockpitNote ?? (detected ? meta.note : null)
-    // ZCode：多开实例感知——所有实例共用 HOME 级 ~/.zcode/cli/db（数据天然全量统计），
-    // 这里把"存活实例数"透出到侧栏，让多开参与统计可感知。
-    if (id === 'zcode') {
+    // ZCode：多开实例感知仅针对包含本机节点的视图
+    if (!isRemoteOnly && id === 'zcode') {
       try {
         const insts = deps.zcode.instances()
         const running = insts.filter((i) => i.running).length
@@ -122,11 +190,6 @@ function buildAgentInfos(deps: IpcDeps): AgentInfo[] {
         // 实例枚举失败不影响主统计
       }
     }
-    const today = todayByAgent.get(id)
-    const act = activity.get(id)
-    const so = sessionOnly.get(id)
-    const last = act?.last ?? so?.last ?? null
-    const sessions = sessionUnion.get(id) ?? 0
     let status: AgentInfo['status']
     if (!detected && !today && !act) status = 'nodata'
     else if (last != null && now - last <= ACTIVE_WINDOW_MS) status = 'active'
@@ -140,15 +203,20 @@ function buildAgentInfos(deps: IpcDeps): AgentInfo[] {
       status,
       todayTokens: today?.tokens ?? 0,
       todayRequests: today?.requests ?? 0,
+      rangeTokens: rangeByAgent.get(id) ?? 0,
+      totalTokens: act?.tokens ?? 0,
       lastActivityAt: last,
       sessionCount: sessions,
       note,
     })
   }
-  // 有数据的排前，其余按名称
+  // 当前时间范围有消耗的排前，其次按历史总消耗与会话数，最后按名称
   return infos.sort((a, b) => {
-    const ta = a.todayTokens + a.sessionCount
-    const tb = b.todayTokens + b.sessionCount
+    const ra = a.rangeTokens ?? a.todayTokens
+    const rb = b.rangeTokens ?? b.todayTokens
+    if (ra !== rb) return rb - ra
+    const ta = (a.totalTokens ?? 0) + a.sessionCount
+    const tb = (b.totalTokens ?? 0) + b.sessionCount
     if (ta !== tb) return tb - ta
     return a.label.localeCompare(b.label)
   })
@@ -164,7 +232,14 @@ export function registerIpc(deps: IpcDeps): void {
   // 自定义范围：customStart/customEnd（epoch ms）提供时覆盖 range 推导
   ipcMain.handle(
     'nexus:getBoard',
-    (_e, range: RangeKey, agent: string | null, customStart: unknown, customEnd: unknown) => {
+    (
+      _e,
+      range: RangeKey,
+      agent: string | null,
+      customStart: unknown,
+      customEnd: unknown,
+      nodeId: unknown
+    ) => {
       const custom =
         typeof customStart === 'number' &&
         typeof customEnd === 'number' &&
@@ -173,7 +248,9 @@ export function registerIpc(deps: IpcDeps): void {
         customEnd > customStart
           ? { start: customStart, end: customEnd }
           : undefined
-      return q.getBoard(range, agent, Date.now(), custom)
+      const safeNodeId =
+        typeof nodeId === 'string' && nodeId.length > 0 && nodeId.length <= 128 ? nodeId : null
+      return q.getBoard(range, agent, Date.now(), custom, safeNodeId)
     }
   )
   // 自定义时间范围持久化（重启保持）
@@ -228,7 +305,33 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle('nexus:getToolStats', (_e, range: RangeKey, agent: string | null) =>
     q.getToolStats(range, agent)
   )
-  ipcMain.handle('nexus:getAgents', () => buildAgentInfos(deps))
+  ipcMain.handle(
+    'nexus:getAgents',
+    (_e, range?: unknown, customStart?: unknown, customEnd?: unknown, nodeId?: unknown) => {
+      const r: RangeKey =
+        range === 'today' ||
+        range === 'yesterday' ||
+        range === '7d' ||
+        range === '30d' ||
+        range === 'month' ||
+        range === 'year' ||
+        range === 'all' ||
+        range === 'custom'
+          ? range
+          : 'today'
+      const custom =
+        typeof customStart === 'number' &&
+        typeof customEnd === 'number' &&
+        Number.isFinite(customStart) &&
+        Number.isFinite(customEnd) &&
+        customEnd > customStart
+          ? { start: customStart, end: customEnd }
+          : undefined
+      const safeNodeId =
+        typeof nodeId === 'string' && nodeId.length > 0 && nodeId.length <= 128 ? nodeId : null
+      return buildAgentInfos(deps, r, custom, safeNodeId)
+    }
+  )
   ipcMain.handle('nexus:getSessions', (_e, range: RangeKey, agent: string | null, limit: number) =>
     q.getSessions(range, agent, Math.min(Math.max(1, limit), 200))
   )
@@ -237,16 +340,28 @@ export function registerIpc(deps: IpcDeps): void {
     await deps.sync.syncNow()
   })
 
-  ipcMain.handle('nexus:getSettings', (): Settings => {
-    const theme = deps.store.getSetting('theme')
-    // 只提供 dark/light 两档：'system' 在渲染层有时序歧义（红队 N-13），存量为 system 时归一为 dark
-    return { theme: theme === 'light' ? 'light' : 'dark' }
-  })
+  const readSettings = (): Settings => {
+    const capture = Boolean(process.env.NEXUS_CAPTURE)
+    const theme = (capture && process.env.NEXUS_CAPTURE_THEME) || deps.store.getSetting('theme')
+    const uiStyle = (capture && process.env.NEXUS_CAPTURE_STYLE) || deps.store.getSetting('uiStyle')
+    return {
+      // 只提供 dark/light 两档：'system' 在渲染层有时序歧义（红队 N-13），存量为 system 时归一为 dark
+      theme: theme === 'light' ? 'light' : 'dark',
+      uiStyle: uiStyle === 'classic' ? 'classic' : 'nexus'
+    }
+  }
+
+  ipcMain.handle('nexus:getSettings', (): Settings => readSettings())
   ipcMain.handle('nexus:setTheme', (_e, theme: Settings['theme']): Settings => {
     const normalized = theme === 'light' ? 'light' : 'dark'
     deps.store.setSetting('theme', normalized)
     nativeTheme.themeSource = normalized
-    return { theme: normalized }
+    return readSettings()
+  })
+  ipcMain.handle('nexus:setUiStyle', (_e, style: NonNullable<Settings['uiStyle']>): Settings => {
+    const normalized = style === 'classic' ? 'classic' : 'nexus'
+    deps.store.setSetting('uiStyle', normalized)
+    return readSettings()
   })
 
   ipcMain.handle('nexus:getRetentionDays', (): number => {
@@ -276,6 +391,48 @@ export function registerIpc(deps: IpcDeps): void {
   })
   ipcMain.handle('nexus:revokeDevice', (_e, deviceId: string) => {
     if (typeof deviceId === 'string' && deviceId.startsWith('dev_')) deps.remote.revokeDevice(deviceId)
+  })
+
+  // ── Nexus Mesh：多机硬件识别、配对与增量组网 ──
+  ipcMain.handle('nexus:getMeshStatus', async () => {
+    if (!deps.mesh) throw new Error('Mesh 服务尚未初始化')
+    return deps.mesh.getStatus()
+  })
+  ipcMain.handle('nexus:setLocalNodeAlias', async (_e, alias: unknown) => {
+    if (!deps.mesh) throw new Error('Mesh 服务尚未初始化')
+    const val = typeof alias === 'string' ? alias.slice(0, 48) : null
+    return deps.mesh.setLocalAlias(val)
+  })
+  ipcMain.handle('nexus:setLocalNodeRole', async (_e, role: unknown) => {
+    if (!deps.mesh) throw new Error('Mesh 服务尚未初始化')
+    const val: NodeRole | null = role === 'hub' || role === 'spoke' ? role : null
+    return deps.mesh.setLocalRole(val)
+  })
+  ipcMain.handle('nexus:pairWithHub', async (_e, input: unknown) => {
+    if (!deps.mesh) throw new Error('Mesh 服务尚未初始化')
+    const obj = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>
+    return deps.mesh.pairWithHub({
+      uri: typeof obj.uri === 'string' ? obj.uri.slice(0, 1024) : undefined,
+      host: typeof obj.host === 'string' ? obj.host.slice(0, 256) : undefined,
+      port: typeof obj.port === 'number' ? obj.port : undefined,
+      pin: typeof obj.pin === 'string' ? obj.pin.slice(0, 12) : undefined,
+      nonce: typeof obj.nonce === 'string' ? obj.nonce.slice(0, 128) : undefined,
+      pairingSecret: typeof obj.pairingSecret === 'string' ? obj.pairingSecret.slice(0, 256) : undefined
+    })
+  })
+  ipcMain.handle('nexus:disconnectHub', async () => {
+    if (!deps.mesh) throw new Error('Mesh 服务尚未初始化')
+    return deps.mesh.disconnectHub()
+  })
+  ipcMain.handle('nexus:triggerMeshSync', async () => {
+    if (!deps.mesh) throw new Error('Mesh 服务尚未初始化')
+    return deps.mesh.triggerSync()
+  })
+  ipcMain.handle('nexus:removeMeshNode', async (_e, nodeId: unknown) => {
+    if (!deps.mesh) throw new Error('Mesh 服务尚未初始化')
+    const safeId = typeof nodeId === 'string' && nodeId !== 'local' ? nodeId.slice(0, 128) : ''
+    if (!safeId) throw new Error('节点 ID 无效')
+    return deps.mesh.removeNode(safeId)
   })
 
   // ── v2：账号与配额 ──
@@ -427,6 +584,12 @@ export function broadcastSyncProgress(
 export function broadcastMaximizeState(win: BrowserWindow | null, maximized: boolean): void {
   if (win && !win.isDestroyed()) {
     win.webContents.send('nexus:maximize-changed', maximized)
+  }
+}
+
+export function broadcastMeshStatus(win: BrowserWindow | null, status: MeshStatusInfo): void {
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('nexus:mesh-update', status)
   }
 }
 

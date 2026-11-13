@@ -1,6 +1,6 @@
 // Nexus 主进程入口：创建窗口、装配各模块（依赖注入）、启动同步循环。
 
-import { app, BrowserWindow, nativeTheme, Notification } from 'electron'
+import { app, BrowserWindow, nativeTheme, Notification, powerSaveBlocker } from 'electron'
 import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 import { NexusStore } from './modules/aggregator/infrastructure/store'
@@ -15,11 +15,26 @@ import { QuotaEngine } from './modules/quotas/engine'
 import { logger } from './modules/shared/logger'
 import { PLATFORM_INTEGRATIONS } from './modules/quotas/platforms/registry'
 import { RemoteServer } from './modules/remote/server'
-import { registerIpc, broadcastSyncProgress, broadcastMaximizeState } from './ipc/register'
+import { NodeIdentityService } from './modules/mesh/identity'
+import { MeshClient } from './modules/mesh/client'
+import { MeshService } from './modules/mesh/service'
+import {
+  parseHeadlessMeshArgs,
+  printHeadlessUsage,
+  runHeadlessMeshAgent
+} from './modules/mesh/headless'
+import {
+  registerIpc,
+  broadcastSyncProgress,
+  broadcastMaximizeState,
+  broadcastMeshStatus
+} from './ipc/register'
 
 let mainWindow: BrowserWindow | null = null
 let store: NexusStore | null = null
 let sync: SyncService | null = null
+let meshClient: MeshClient | null = null
+let remoteServer: RemoteServer | null = null
 
 /**
  * 一次性迁移（蓝队 F4）：旧版 codex 适配器用畸形文件名回退 id 落库，
@@ -44,7 +59,14 @@ function createWindow(): void {
     title: 'Nexus',
     // 应用图标：任务栏/Alt+Tab（安装包图标由 electron-builder 从 build/icon.ico 取）
     icon: join(app.getAppPath(), 'build/icon.ico'),
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#161616' : '#f8f8f8',
+    backgroundColor:
+      process.env.NEXUS_CAPTURE && process.env.NEXUS_CAPTURE_STYLE === 'classic'
+        ? nativeTheme.shouldUseDarkColors
+          ? '#161616'
+          : '#f8f8f8'
+        : nativeTheme.shouldUseDarkColors
+          ? '#0b0d12'
+          : '#eceae3',
     autoHideMenuBar: true,
     show: false,
     // 无边框窗口：自绘顶栏 + 自绘窗口控制钮。
@@ -136,16 +158,20 @@ function createWindow(): void {
   }
 }
 
-// 单实例锁（红队 N-14）：双开会导致双份同步循环互踩 sync_state
-if (!app.requestSingleInstanceLock()) {
-  app.quit()
-} else {
-  app.on('second-instance', () => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore()
-      mainWindow.focus()
-    }
-  })
+const headlessMode = process.argv.includes('--headless-mesh')
+
+// 单实例锁（红队 N-14）：双开会导致双份同步循环互踩 sync_state；无头 Mesh 模式使用独立目录不抢占桌面临时锁
+if (!headlessMode) {
+  if (!app.requestSingleInstanceLock()) {
+    app.quit()
+  } else {
+    app.on('second-instance', () => {
+      if (mainWindow) {
+        if (mainWindow.isMinimized()) mainWindow.restore()
+        mainWindow.focus()
+      }
+    })
+  }
 }
 
 if (process.env.NEXUS_CAPTURE) {
@@ -154,26 +180,53 @@ if (process.env.NEXUS_CAPTURE) {
 }
 
 app.whenReady()
-  .then(() => {
+  .then(async () => {
+  if (headlessMode) {
+    const blocker = powerSaveBlocker.start('prevent-app-suspension')
+    const { help, options } = parseHeadlessMeshArgs(process.argv.slice(2))
+    try {
+      if (help) {
+        printHeadlessUsage()
+      } else {
+        await runHeadlessMeshAgent(options)
+      }
+      powerSaveBlocker.stop(blocker)
+      app.exit(0)
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[headless-mesh] FAIL:', err instanceof Error ? err.message : String(err))
+      powerSaveBlocker.stop(blocker)
+      app.exit(1)
+    }
+    return
+  }
+
   const dbPath = join(app.getPath('userData'), 'nexus.db')
   store = new NexusStore(dbPath)
   logger.info('store.ready', { dbPath })
   remigrateCodexIfFlagged(store)
 
-  const theme = store.getSetting('theme')
+  const identity = new NodeIdentityService(store)
+
+  const captureTheme = process.env.NEXUS_CAPTURE ? process.env.NEXUS_CAPTURE_THEME : undefined
+  const theme = captureTheme ?? store.getSetting('theme')
   nativeTheme.themeSource = theme === 'light' ? 'light' : 'dark'
 
   // WCO 窗口控制钮区域颜色跟随主题（含启动与运行中切换；updated 在 themeSource 变化时触发）
   // WCO 已移除（自绘窗口控制钮随渲染层主题即时变色），无需原生 overlay 同步
 
   const adapters = createAdapters(store)
-  const query = new QueryService(store)
+  const query = new QueryService(store, () => identity.nodeId)
+  const getActiveAgents = (): string[] => adapters.filter((a) => a.detect()).map((a) => a.id)
 
   // 看板缓存：sync 有新数据即失效；随后 3s 错峰预热常用范围（7天+全部），
   // 让用户切范围基本命中内存（0ms）。预热本身 ~0.7s，撞上用户点击的概率 <2%。
   let boardWarmer: NodeJS.Timeout | null = null
   const onSyncDone = (): void => {
     query.invalidateBoardCache()
+    if (meshClient && meshClient.loadConfig() && identity.getEffectiveRole() === 'spoke') {
+      void meshClient.syncDelta().catch(() => undefined)
+    }
     if (boardWarmer) clearTimeout(boardWarmer)
     boardWarmer = setTimeout(() => {
       boardWarmer = null
@@ -192,7 +245,7 @@ app.whenReady()
     if (p.phase === 'done') onSyncDone()
   })
 
-  // v2：系统采集 / 多开实例 / DSH 桥接 / 远程服务
+  // v2：系统采集 / 多开实例 / DSH 桥接 / 远程服务 / Mesh 组网
   const system = new SystemCollector()
   const zcode = new ZcodeManager()
   const dsh = new DshBridge()
@@ -285,18 +338,68 @@ app.whenReady()
     remoteSecret = randomBytes(32).toString('hex')
     store.setSetting('remoteSecret', remoteSecret)
   }
+  let meshService: MeshService | null = null
+  const triggerMeshChanged = (): void => {
+    void meshService?.notifyChanged().catch(() => undefined)
+  }
   const remote = new RemoteServer(
-    { store, query, system, zcode, dsh, userDataDir: app.getPath('userData') },
+    {
+      store,
+      query,
+      system,
+      zcode,
+      dsh,
+      userDataDir: app.getPath('userData'),
+      identity,
+      getActiveAgents,
+      onMeshChanged: triggerMeshChanged
+    },
     remoteSecret
   )
+  remoteServer = remote
+  meshClient = new MeshClient(store, identity, system, getActiveAgents, triggerMeshChanged)
+  meshService = new MeshService({
+    store,
+    identity,
+    system,
+    remote,
+    client: meshClient,
+    getActiveAgents,
+    onInvalidateBoard: () => query.invalidateBoardCache(),
+    onStatusChanged: (st) => broadcastMeshStatus(mainWindow, st)
+  })
 
-  registerIpc({ store, query, sync, adapters, presence: PRESENCE_ONLY_AGENTS, system, zcode, dsh, cockpit, quota, remote, getMainWindow: () => mainWindow })
+  registerIpc({
+    store,
+    query,
+    sync,
+    adapters,
+    presence: PRESENCE_ONLY_AGENTS,
+    system,
+    zcode,
+    dsh,
+    cockpit,
+    quota,
+    remote,
+    mesh: meshService,
+    getMainWindow: () => mainWindow
+  })
 
   quota.startPolling()
 
-  if (store.getSetting('remoteEnabled') === '1') {
+  if (
+    store.getSetting('remoteEnabled') === '1' ||
+    store.listMeshNodeRecords().some((n) => n.role === 'spoke')
+  ) {
     remote.start()
   }
+
+  void identity.probeKind().then(() => {
+    if (meshClient?.loadConfig() && identity.getEffectiveRole() === 'spoke') {
+      meshClient.start()
+    }
+    triggerMeshChanged()
+  })
 
   createWindow()
   sync.startBackgroundLoop()
@@ -324,6 +427,8 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  meshClient?.stop()
+  remoteServer?.stop()
   sync?.dispose()
   store?.close()
 })

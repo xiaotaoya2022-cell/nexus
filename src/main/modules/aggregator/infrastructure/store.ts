@@ -14,6 +14,53 @@ import type {
   SessionRecordInput,
   ToolCallRecordInput
 } from '@main/modules/adapter/domain/types'
+import type {
+  MeshUsageRecordWire,
+  MeshSessionRecordWire,
+  MeshToolCallRecordWire,
+  MeshIngestBatch,
+  MeshIngestAck
+} from '@shared/protocol'
+import type {
+  LinkTransport,
+  MeshWatermark,
+  NodeHardwareSummary,
+  NodeKind,
+  NodeRole
+} from '@shared/types'
+
+export interface StoredMeshNode {
+  nodeId: string
+  hostname: string
+  alias: string | null
+  kind: NodeKind
+  role: NodeRole
+  transport: LinkTransport
+  endpoint: string | null
+  rttMs: number | null
+  lastSeenAt: number
+  ackedWatermark: MeshWatermark
+  hwSummary: NodeHardwareSummary | null
+  activeAgents: string[]
+  createdAt: number
+}
+
+export interface UpsertMeshNodeInput {
+  nodeId: string
+  hostname: string
+  alias?: string | null
+  kind: NodeKind
+  role: NodeRole
+  transport: LinkTransport
+  endpoint?: string | null
+  rttMs?: number | null
+  lastSeenAt: number
+  ackedWatermark?: MeshWatermark
+  hwSummary?: NodeHardwareSummary | null
+  activeAgents?: string[]
+}
+
+const DEFAULT_INGEST_CHUNK_BYTES = 160 * 1024
 
 export const TOTAL_EXPR =
   '(input_tokens + output_tokens + reasoning_tokens + cache_read_tokens + cache_write_tokens)'
@@ -66,6 +113,24 @@ const SCHEMA_STATEMENTS: string[] = [
     updated_at INTEGER
   )`,
   'CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)',
+  // Nexus Mesh 节点档案表（存储已配对物理机 / VM / WSL2 / 远程从节点档案与同步水位线）
+  `CREATE TABLE IF NOT EXISTS mesh_nodes (
+    node_id TEXT PRIMARY KEY,
+    hostname TEXT NOT NULL,
+    alias TEXT,
+    kind TEXT NOT NULL DEFAULT 'physical',
+    role TEXT NOT NULL DEFAULT 'spoke',
+    transport TEXT NOT NULL DEFAULT 'lan',
+    endpoint TEXT,
+    rtt_ms INTEGER,
+    last_seen_at INTEGER NOT NULL DEFAULT 0,
+    acked_watermark INTEGER NOT NULL DEFAULT 0,
+    acked_tool_watermark INTEGER NOT NULL DEFAULT 0,
+    acked_session_seq INTEGER NOT NULL DEFAULT 0,
+    hw_json TEXT,
+    active_agents_json TEXT,
+    created_at INTEGER NOT NULL DEFAULT 0
+  )`,
   // 账号级每日真实消耗（官方账单口径，如 DeepSeek 开放平台 usage API）
   `CREATE TABLE IF NOT EXISTS account_usage_daily (
     platform TEXT NOT NULL,
@@ -108,26 +173,92 @@ export class NexusStore implements StoreWriter {
     this.db = new DatabaseSync(dbPath)
     this.db.prepare('PRAGMA journal_mode = WAL').get()
     for (const stmt of SCHEMA_STATEMENTS) this.db.prepare(stmt).run()
-    try {
-      // 增量迁移（已存在时抛错忽略）：usage_records.requests——官方账单合成行每行代表 N 次请求
-      this.db.prepare('ALTER TABLE usage_records ADD COLUMN requests INTEGER NOT NULL DEFAULT 1').run()
-    } catch {
-      // 列已存在
-    }
+    this.runMigrations()
+    const maxSeqRow = this.db.prepare('SELECT COALESCE(MAX(mesh_seq), 0) m FROM sessions').get() as
+      | { m?: number }
+      | undefined
+    this.sessionSeqCounter = Number(maxSeqRow?.m ?? 0) || 0
     this.prepareStatements()
+  }
+
+  private sessionSeqCounter = 0
+
+  private hasColumn(table: string, col: string): boolean {
+    const rows = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+    return rows.some((r) => r.name === col)
+  }
+
+  private runMigrations(): void {
+    if (!this.hasColumn('usage_records', 'requests')) {
+      this.db.prepare('ALTER TABLE usage_records ADD COLUMN requests INTEGER NOT NULL DEFAULT 1').run()
+    }
+    if (!this.hasColumn('usage_records', 'source_node_id')) {
+      this.db.prepare("ALTER TABLE usage_records ADD COLUMN source_node_id TEXT NOT NULL DEFAULT 'local'").run()
+    }
+    this.db.prepare('CREATE INDEX IF NOT EXISTS idx_usage_node_ts ON usage_records(source_node_id, ts)').run()
+
+    if (!this.hasColumn('tool_calls', 'source_node_id')) {
+      this.db.prepare("ALTER TABLE tool_calls ADD COLUMN source_node_id TEXT NOT NULL DEFAULT 'local'").run()
+    }
+    this.db.prepare('CREATE INDEX IF NOT EXISTS idx_tool_node_ts ON tool_calls(source_node_id, ts)').run()
+
+    if (!this.hasColumn('sessions', 'source_node_id')) {
+      this.begin()
+      try {
+        this.db
+          .prepare(
+            `CREATE TABLE sessions_v2 (
+              source_node_id TEXT NOT NULL DEFAULT 'local',
+              agent TEXT NOT NULL,
+              session_id TEXT NOT NULL,
+              title TEXT,
+              project_dir TEXT,
+              model TEXT,
+              started_at INTEGER,
+              updated_at INTEGER,
+              mesh_seq INTEGER NOT NULL DEFAULT 0,
+              PRIMARY KEY (source_node_id, agent, session_id)
+            )`
+          )
+          .run()
+        this.db
+          .prepare(
+            `INSERT INTO sessions_v2
+              (source_node_id, agent, session_id, title, project_dir, model, started_at, updated_at, mesh_seq)
+             SELECT 'local', agent, session_id, title, project_dir, model, started_at, updated_at, rowid FROM sessions`
+          )
+          .run()
+        this.db.prepare('DROP TABLE sessions').run()
+        this.db.prepare('ALTER TABLE sessions_v2 RENAME TO sessions').run()
+        this.db.prepare('CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions(updated_at)').run()
+        this.commit()
+      } catch (err) {
+        this.rollback()
+        throw err
+      }
+    } else if (!this.hasColumn('sessions', 'mesh_seq')) {
+      this.db.prepare('ALTER TABLE sessions ADD COLUMN mesh_seq INTEGER NOT NULL DEFAULT 0').run()
+      this.db.prepare('UPDATE sessions SET mesh_seq = rowid WHERE mesh_seq = 0').run()
+    } else {
+      this.db.prepare('UPDATE sessions SET mesh_seq = rowid WHERE mesh_seq = 0').run()
+    }
+    this.db.prepare('CREATE INDEX IF NOT EXISTS idx_sessions_node_seq ON sessions(source_node_id, mesh_seq)').run()
   }
 
   private stmtUsage!: ReturnType<DatabaseSync['prepare']>
   private stmtSession!: ReturnType<DatabaseSync['prepare']>
   private stmtTool!: ReturnType<DatabaseSync['prepare']>
+  private stmtRemoteUsage!: ReturnType<DatabaseSync['prepare']>
+  private stmtRemoteSession!: ReturnType<DatabaseSync['prepare']>
+  private stmtRemoteTool!: ReturnType<DatabaseSync['prepare']>
 
   private prepareStatements(): void {
     // 幂等且可刷新：重叠窗重读时同 dedupe_key 更新时间与用量（红队 N-01 修复）
     this.stmtUsage = this.db.prepare(`
       INSERT INTO usage_records
-        (agent, model, provider, ts, input_tokens, output_tokens, reasoning_tokens,
+        (source_node_id, agent, model, provider, ts, input_tokens, output_tokens, reasoning_tokens,
          cache_read_tokens, cache_write_tokens, session_id, dedupe_key, is_estimated, requests)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES ('local', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(dedupe_key) DO UPDATE SET
         ts = excluded.ts,
         model = excluded.model,
@@ -136,21 +267,57 @@ export class NexusStore implements StoreWriter {
         reasoning_tokens = excluded.reasoning_tokens,
         cache_read_tokens = excluded.cache_read_tokens,
         cache_write_tokens = excluded.cache_write_tokens,
-        session_id = COALESCE(excluded.session_id, usage_records.session_id)
+        session_id = COALESCE(excluded.session_id, usage_records.session_id),
+        requests = excluded.requests
     `)
     this.stmtSession = this.db.prepare(`
-      INSERT INTO sessions (agent, session_id, title, project_dir, model, started_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(agent, session_id) DO UPDATE SET
+      INSERT INTO sessions
+        (source_node_id, agent, session_id, title, project_dir, model, started_at, updated_at, mesh_seq)
+      VALUES ('local', ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(source_node_id, agent, session_id) DO UPDATE SET
         title = COALESCE(excluded.title, sessions.title),
         project_dir = COALESCE(excluded.project_dir, sessions.project_dir),
         model = COALESCE(excluded.model, sessions.model),
         started_at = COALESCE(sessions.started_at, excluded.started_at),
-        updated_at = MAX(COALESCE(sessions.updated_at, 0), COALESCE(excluded.updated_at, 0))
+        updated_at = MAX(COALESCE(sessions.updated_at, 0), COALESCE(excluded.updated_at, 0)),
+        mesh_seq = excluded.mesh_seq
     `)
     this.stmtTool = this.db.prepare(`
-      INSERT INTO tool_calls (agent, tool_name, ts, session_id, dedupe_key)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO tool_calls (source_node_id, agent, tool_name, ts, session_id, dedupe_key)
+      VALUES ('local', ?, ?, ?, ?, ?)
+      ON CONFLICT(dedupe_key) DO UPDATE SET ts = excluded.ts, tool_name = excluded.tool_name
+    `)
+    this.stmtRemoteUsage = this.db.prepare(`
+      INSERT INTO usage_records
+        (source_node_id, agent, model, provider, ts, input_tokens, output_tokens, reasoning_tokens,
+         cache_read_tokens, cache_write_tokens, session_id, dedupe_key, is_estimated, requests)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(dedupe_key) DO UPDATE SET
+        ts = excluded.ts,
+        model = excluded.model,
+        input_tokens = excluded.input_tokens,
+        output_tokens = excluded.output_tokens,
+        reasoning_tokens = excluded.reasoning_tokens,
+        cache_read_tokens = excluded.cache_read_tokens,
+        cache_write_tokens = excluded.cache_write_tokens,
+        session_id = COALESCE(excluded.session_id, usage_records.session_id),
+        requests = excluded.requests
+    `)
+    this.stmtRemoteSession = this.db.prepare(`
+      INSERT INTO sessions
+        (source_node_id, agent, session_id, title, project_dir, model, started_at, updated_at, mesh_seq)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(source_node_id, agent, session_id) DO UPDATE SET
+        title = COALESCE(excluded.title, sessions.title),
+        project_dir = COALESCE(excluded.project_dir, sessions.project_dir),
+        model = COALESCE(excluded.model, sessions.model),
+        started_at = COALESCE(sessions.started_at, excluded.started_at),
+        updated_at = MAX(COALESCE(sessions.updated_at, 0), COALESCE(excluded.updated_at, 0)),
+        mesh_seq = excluded.mesh_seq
+    `)
+    this.stmtRemoteTool = this.db.prepare(`
+      INSERT INTO tool_calls (source_node_id, agent, tool_name, ts, session_id, dedupe_key)
+      VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(dedupe_key) DO UPDATE SET ts = excluded.ts, tool_name = excluded.tool_name
     `)
   }
@@ -202,6 +369,7 @@ export class NexusStore implements StoreWriter {
     try {
       for (const r of rows) {
         if (!r.sessionId) continue
+        const seq = ++this.sessionSeqCounter
         this.stmtSession.run(
           r.agent,
           r.sessionId,
@@ -209,7 +377,8 @@ export class NexusStore implements StoreWriter {
           r.projectDir ?? null,
           r.model ?? null,
           r.startedAt ?? null,
-          r.updatedAt ?? null
+          r.updatedAt ?? null,
+          seq
         )
       }
       this.commit()
@@ -419,6 +588,349 @@ export class NexusStore implements StoreWriter {
         'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
       )
       .run(key, value)
+  }
+
+  // ── Nexus Mesh（跨机多节点数据分片导出 / 幂等汇流 / 档案维护）──
+
+  /** 提取本机（source_node_id = 'local'）在指定水位线之后的增量记录，严格控制单帧体积 */
+  exportLocalDelta(
+    after: MeshWatermark,
+    maxBytes = DEFAULT_INGEST_CHUNK_BYTES
+  ): {
+    usage: MeshUsageRecordWire[]
+    sessions: MeshSessionRecordWire[]
+    tools: MeshToolCallRecordWire[]
+    nextWatermark: MeshWatermark
+    hasMore: boolean
+  } {
+    const usageOut: MeshUsageRecordWire[] = []
+    const sessionsOut: MeshSessionRecordWire[] = []
+    const toolsOut: MeshToolCallRecordWire[] = []
+    const nextWatermark: MeshWatermark = { ...after }
+    let bytes = 256
+    let hasMore = false
+
+    const usageRows = this.db
+      .prepare(
+        `SELECT id, agent, model, provider, ts, input_tokens, output_tokens, reasoning_tokens,
+                cache_read_tokens, cache_write_tokens, session_id, dedupe_key, is_estimated, requests
+         FROM usage_records
+         WHERE source_node_id = 'local' AND id > ?
+         ORDER BY id ASC
+         LIMIT 300`
+      )
+      .all(after.usageId) as Array<Record<string, unknown>>
+
+    for (const r of usageRows) {
+      const item: MeshUsageRecordWire = {
+        id: Number(r.id),
+        agent: String(r.agent),
+        model: String(r.model ?? 'unknown'),
+        provider: r.provider == null ? null : String(r.provider),
+        ts: Number(r.ts),
+        inputTokens: Number(r.input_tokens) || 0,
+        outputTokens: Number(r.output_tokens) || 0,
+        reasoningTokens: Number(r.reasoning_tokens) || 0,
+        cacheReadTokens: Number(r.cache_read_tokens) || 0,
+        cacheWriteTokens: Number(r.cache_write_tokens) || 0,
+        sessionId: r.session_id == null ? null : String(r.session_id),
+        dedupeKey: String(r.dedupe_key),
+        isEstimated: Boolean(r.is_estimated),
+        requests: Number(r.requests) || 1
+      }
+      const itemBytes = Buffer.byteLength(JSON.stringify(item)) + 2
+      if (bytes + itemBytes > maxBytes && usageOut.length > 0) {
+        hasMore = true
+        return { usage: usageOut, sessions: sessionsOut, tools: toolsOut, nextWatermark, hasMore }
+      }
+      bytes += itemBytes
+      usageOut.push(item)
+      nextWatermark.usageId = item.id
+    }
+    if (usageRows.length === 300) {
+      hasMore = true
+      return { usage: usageOut, sessions: sessionsOut, tools: toolsOut, nextWatermark, hasMore }
+    }
+
+    const sessionRows = this.db
+      .prepare(
+        `SELECT agent, session_id, title, project_dir, model, started_at, updated_at, mesh_seq
+         FROM sessions
+         WHERE source_node_id = 'local' AND mesh_seq > ?
+         ORDER BY mesh_seq ASC
+         LIMIT 120`
+      )
+      .all(after.sessionSeq) as Array<Record<string, unknown>>
+
+    for (const r of sessionRows) {
+      const item: MeshSessionRecordWire = {
+        agent: String(r.agent),
+        sessionId: String(r.session_id),
+        title: r.title == null ? null : String(r.title),
+        projectDir: r.project_dir == null ? null : String(r.project_dir),
+        model: r.model == null ? null : String(r.model),
+        startedAt: r.started_at == null ? null : Number(r.started_at),
+        updatedAt: r.updated_at == null ? null : Number(r.updated_at),
+        meshSeq: Number(r.mesh_seq) || 0
+      }
+      const itemBytes = Buffer.byteLength(JSON.stringify(item)) + 2
+      if (bytes + itemBytes > maxBytes && (usageOut.length + sessionsOut.length > 0)) {
+        hasMore = true
+        return { usage: usageOut, sessions: sessionsOut, tools: toolsOut, nextWatermark, hasMore }
+      }
+      bytes += itemBytes
+      sessionsOut.push(item)
+      nextWatermark.sessionSeq = item.meshSeq
+    }
+    if (sessionRows.length === 120) {
+      hasMore = true
+      return { usage: usageOut, sessions: sessionsOut, tools: toolsOut, nextWatermark, hasMore }
+    }
+
+    const toolRows = this.db
+      .prepare(
+        `SELECT id, agent, tool_name, ts, session_id, dedupe_key
+         FROM tool_calls
+         WHERE source_node_id = 'local' AND id > ?
+         ORDER BY id ASC
+         LIMIT 300`
+      )
+      .all(after.toolId) as Array<Record<string, unknown>>
+
+    for (const r of toolRows) {
+      const item: MeshToolCallRecordWire = {
+        id: Number(r.id),
+        agent: String(r.agent),
+        toolName: String(r.tool_name),
+        ts: r.ts == null ? null : Number(r.ts),
+        sessionId: r.session_id == null ? null : String(r.session_id),
+        dedupeKey: String(r.dedupe_key)
+      }
+      const itemBytes = Buffer.byteLength(JSON.stringify(item)) + 2
+      if (bytes + itemBytes > maxBytes && (usageOut.length + sessionsOut.length + toolsOut.length > 0)) {
+        hasMore = true
+        return { usage: usageOut, sessions: sessionsOut, tools: toolsOut, nextWatermark, hasMore }
+      }
+      bytes += itemBytes
+      toolsOut.push(item)
+      nextWatermark.toolId = item.id
+    }
+    if (toolRows.length === 300) hasMore = true
+
+    return { usage: usageOut, sessions: sessionsOut, tools: toolsOut, nextWatermark, hasMore }
+  }
+
+  /** Hub 幂等写入远端节点分片：以 mesh:<nodeId>:<dedupeKey> 隔离主键，绝不覆盖或双计本机数据 */
+  ingestRemoteBatch(sourceNodeId: string, batch: MeshIngestBatch): MeshIngestAck {
+    if (!sourceNodeId || sourceNodeId === 'local') {
+      throw new Error('远端 sourceNodeId 无效')
+    }
+    let acceptedUsage = 0
+    let acceptedSessions = 0
+    let acceptedTools = 0
+    const now = Date.now()
+    const w = batch.watermarkAfter
+
+    this.begin()
+    try {
+      for (const u of batch.usage) {
+        const res = this.stmtRemoteUsage.run(
+          sourceNodeId,
+          u.agent,
+          u.model,
+          u.provider ?? null,
+          u.ts,
+          u.inputTokens,
+          u.outputTokens,
+          u.reasoningTokens,
+          u.cacheReadTokens,
+          u.cacheWriteTokens,
+          u.sessionId ?? null,
+          `mesh:${sourceNodeId}:${u.dedupeKey}`,
+          u.isEstimated ? 1 : 0,
+          u.requests ?? 1
+        )
+        acceptedUsage += Number(res.changes)
+      }
+      for (const s of batch.sessions) {
+        if (!s.sessionId) continue
+        this.stmtRemoteSession.run(
+          sourceNodeId,
+          s.agent,
+          s.sessionId,
+          s.title ?? null,
+          s.projectDir ?? null,
+          s.model ?? null,
+          s.startedAt ?? null,
+          s.updatedAt ?? null,
+          s.meshSeq ?? 0
+        )
+        acceptedSessions += 1
+      }
+      for (const tc of batch.tools) {
+        const res = this.stmtRemoteTool.run(
+          sourceNodeId,
+          tc.agent,
+          tc.toolName,
+          tc.ts ?? null,
+          tc.sessionId ?? null,
+          `mesh:${sourceNodeId}:${tc.dedupeKey}`
+        )
+        acceptedTools += Number(res.changes)
+      }
+
+      this.db
+        .prepare(
+          `UPDATE mesh_nodes SET
+            last_seen_at = MAX(last_seen_at, ?),
+            acked_watermark = MAX(acked_watermark, ?),
+            acked_tool_watermark = MAX(acked_tool_watermark, ?),
+            acked_session_seq = MAX(acked_session_seq, ?)
+           WHERE node_id = ?`
+        )
+        .run(
+          now,
+          Math.max(0, Math.floor(w.usageId)),
+          Math.max(0, Math.floor(w.toolId)),
+          Math.max(0, Math.floor(w.sessionSeq)),
+          sourceNodeId
+        )
+
+      this.commit()
+    } catch (err) {
+      this.rollback()
+      throw err
+    }
+
+    const node = this.getMeshNodeRecord(sourceNodeId)
+    return {
+      acceptedUsage,
+      acceptedSessions,
+      acceptedTools,
+      ackedWatermark: node?.ackedWatermark ?? w
+    }
+  }
+
+  upsertMeshNode(input: UpsertMeshNodeInput): void {
+    const now = Date.now()
+    const w = input.ackedWatermark ?? { usageId: 0, toolId: 0, sessionSeq: 0 }
+    this.db
+      .prepare(
+        `INSERT INTO mesh_nodes
+          (node_id, hostname, alias, kind, role, transport, endpoint, rtt_ms, last_seen_at,
+           acked_watermark, acked_tool_watermark, acked_session_seq, hw_json, active_agents_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(node_id) DO UPDATE SET
+           hostname = excluded.hostname,
+           alias = COALESCE(excluded.alias, mesh_nodes.alias),
+           kind = excluded.kind,
+           role = excluded.role,
+           transport = excluded.transport,
+           endpoint = COALESCE(excluded.endpoint, mesh_nodes.endpoint),
+           rtt_ms = COALESCE(excluded.rtt_ms, mesh_nodes.rtt_ms),
+           last_seen_at = MAX(mesh_nodes.last_seen_at, excluded.last_seen_at),
+           hw_json = COALESCE(excluded.hw_json, mesh_nodes.hw_json),
+           active_agents_json = COALESCE(excluded.active_agents_json, mesh_nodes.active_agents_json)`
+      )
+      .run(
+        input.nodeId,
+        input.hostname,
+        input.alias ?? null,
+        input.kind,
+        input.role,
+        input.transport,
+        input.endpoint ?? null,
+        input.rttMs ?? null,
+        input.lastSeenAt,
+        w.usageId,
+        w.toolId,
+        w.sessionSeq,
+        input.hwSummary ? JSON.stringify(input.hwSummary) : null,
+        input.activeAgents ? JSON.stringify(input.activeAgents) : null,
+        now
+      )
+  }
+
+  private mapMeshNodeRow(r: Record<string, unknown>): StoredMeshNode {
+    let hwSummary: NodeHardwareSummary | null = null
+    let activeAgents: string[] = []
+    try {
+      if (r.hw_json) hwSummary = JSON.parse(String(r.hw_json)) as NodeHardwareSummary
+    } catch {
+      hwSummary = null
+    }
+    try {
+      if (r.active_agents_json) activeAgents = JSON.parse(String(r.active_agents_json)) as string[]
+    } catch {
+      activeAgents = []
+    }
+    return {
+      nodeId: String(r.node_id),
+      hostname: String(r.hostname),
+      alias: r.alias == null ? null : String(r.alias),
+      kind: (r.kind ? String(r.kind) : 'physical') as NodeKind,
+      role: (r.role === 'hub' ? 'hub' : 'spoke') as NodeRole,
+      transport: (r.transport ? String(r.transport) : 'lan') as LinkTransport,
+      endpoint: r.endpoint == null ? null : String(r.endpoint),
+      rttMs: r.rtt_ms == null ? null : Number(r.rtt_ms),
+      lastSeenAt: Number(r.last_seen_at) || 0,
+      ackedWatermark: {
+        usageId: Number(r.acked_watermark) || 0,
+        toolId: Number(r.acked_tool_watermark) || 0,
+        sessionSeq: Number(r.acked_session_seq) || 0
+      },
+      hwSummary,
+      activeAgents,
+      createdAt: Number(r.created_at) || 0
+    }
+  }
+
+  getMeshNodeRecord(nodeId: string): StoredMeshNode | null {
+    const row = this.db.prepare('SELECT * FROM mesh_nodes WHERE node_id = ?').get(nodeId) as
+      | Record<string, unknown>
+      | undefined
+    return row ? this.mapMeshNodeRow(row) : null
+  }
+
+  listMeshNodeRecords(): StoredMeshNode[] {
+    const rows = this.db
+      .prepare('SELECT * FROM mesh_nodes ORDER BY last_seen_at DESC, created_at ASC')
+      .all() as Array<Record<string, unknown>>
+    return rows.map((r) => this.mapMeshNodeRow(r))
+  }
+
+  removeMeshNodeRecord(nodeId: string, purgeData = true): void {
+    if (!nodeId || nodeId === 'local') return
+    this.begin()
+    try {
+      this.db.prepare('DELETE FROM mesh_nodes WHERE node_id = ?').run(nodeId)
+      if (purgeData) {
+        this.db.prepare('DELETE FROM usage_records WHERE source_node_id = ?').run(nodeId)
+        this.db.prepare('DELETE FROM sessions WHERE source_node_id = ?').run(nodeId)
+        this.db.prepare('DELETE FROM tool_calls WHERE source_node_id = ?').run(nodeId)
+      }
+      this.commit()
+    } catch (err) {
+      this.rollback()
+      throw err
+    }
+  }
+
+  getNodeUsageStats(): Map<string, { recordCount: number; totalTokens: number }> {
+    const rows = this.db
+      .prepare(
+        `SELECT source_node_id, COUNT(*) c, COALESCE(SUM(${TOTAL_EXPR}), 0) t
+         FROM usage_records GROUP BY source_node_id`
+      )
+      .all() as Array<{ source_node_id: string; c: number; t: number }>
+    const map = new Map<string, { recordCount: number; totalTokens: number }>()
+    for (const r of rows) {
+      map.set(String(r.source_node_id), {
+        recordCount: Number(r.c) || 0,
+        totalTokens: Number(r.t) || 0
+      })
+    }
+    return map
   }
 
   close(): void {

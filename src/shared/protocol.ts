@@ -1,4 +1,10 @@
-// Nexus 远程协议信封 v1（PC 端 ↔ Android 端共用）。
+import type {
+  LinkTransport,
+  MeshWatermark,
+  NodeHardwareSummary,
+  NodeProfile,
+  NodeRole
+} from './types'
 // 设计依据：docs/research/v2/hybrid-communication-architecture-draft.md
 // 原则：JSON over WebSocket；桌面内部 IPC 通道永不进入本协议；
 // version 字段保留升级位；控制类消息带 capability 协商（为 v3 插件市场预留）。
@@ -68,6 +74,10 @@ export type RemoteMethod =
   // 配对/设备
   | 'device.list' // payload: {}
   | 'device.revoke' // payload: { deviceId: string }
+  // Nexus Mesh（多机算力组网）
+  | 'mesh.register' // payload: MeshRegisterRequest → MeshRegisterResult
+  | 'mesh.heartbeat' // payload: MeshHeartbeatRequest → MeshHeartbeatResult
+  | 'mesh.ingest' // payload: MeshIngestBatch → MeshIngestAck
 
 export interface PairRequest {
   /** 配对会话 nonce（来自 PC 二维码 nexus-pair://host:port?n=<nonce>&s=<pairingSecret>#<pin>） */
@@ -123,10 +133,133 @@ export interface RemoteStatusInfo {
 
 export interface PairingAddress {
   host: string
-  /** 网段标注：局域网 / Tailscale/虚拟网（跨网用）/ 其他网络 */
+  /** 网段标注：局域网 / Tailscale/虚拟网（跨网用）/ VMware NAT / WSL vSwitch / 其他网络 */
   label: string
-  /** 完整配对串 nexus-pair://host:port?n=&s=#pin（手机端直接粘贴） */
+  transport?: LinkTransport
+  /** 完整配对串 nexus-pair://host:port?n=&s=#pin（手机端与从节点直接粘贴） */
   uri: string
+}
+
+export interface MeshPeerSummary {
+  nodeId: string
+  hostname: string
+  alias: string | null
+  kind: NodeProfile['kind']
+  role: NodeRole
+  transport: LinkTransport
+  rttMs: number | null
+  lastSeenAt: number
+}
+
+export interface MeshRegisterRequest {
+  profile: NodeProfile
+}
+
+export interface MeshRegisterResult {
+  hubProfile: NodeProfile
+  effectiveRole: NodeRole
+  ackedWatermark: MeshWatermark
+  peers: MeshPeerSummary[]
+}
+
+export interface MeshHeartbeatRequest {
+  nodeId: string
+  hwSummary: NodeHardwareSummary
+  activeAgents: string[]
+  sentAt: number
+  lastRttMs?: number | null
+}
+
+export interface MeshHeartbeatResult {
+  serverTs: number
+  hubRole: NodeRole
+  peers: MeshPeerSummary[]
+}
+
+export interface MeshUsageRecordWire {
+  id: number
+  agent: string
+  model: string
+  provider?: string | null
+  ts: number
+  inputTokens: number
+  outputTokens: number
+  reasoningTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  sessionId?: string | null
+  dedupeKey: string
+  isEstimated?: boolean
+  requests?: number
+}
+
+export interface MeshSessionRecordWire {
+  agent: string
+  sessionId: string
+  title?: string | null
+  projectDir?: string | null
+  model?: string | null
+  startedAt?: number | null
+  updatedAt?: number | null
+  meshSeq: number
+}
+
+export interface MeshToolCallRecordWire {
+  id: number
+  agent: string
+  toolName: string
+  ts: number | null
+  sessionId?: string | null
+  dedupeKey: string
+}
+
+export interface MeshIngestBatch {
+  nodeId: string
+  usage: MeshUsageRecordWire[]
+  sessions: MeshSessionRecordWire[]
+  tools: MeshToolCallRecordWire[]
+  watermarkAfter: MeshWatermark
+}
+
+export interface MeshIngestAck {
+  acceptedUsage: number
+  acceptedSessions: number
+  acceptedTools: number
+  ackedWatermark: MeshWatermark
+}
+
+export interface ParsedPairUri {
+  host: string
+  port: number
+  nonce: string
+  pairingSecret: string
+  pin: string
+}
+
+/** 解析 nexus-pair://host:port?n=<nonce>&s=<pairingSecret>#<pin> */
+export function parsePairUri(raw: string): ParsedPairUri {
+  const trimmed = raw.trim()
+  let url: URL
+  try {
+    url = new URL(trimmed)
+  } catch {
+    throw new Error('配对串格式无效')
+  }
+  if (url.protocol !== 'nexus-pair:') {
+    throw new Error('仅支持 nexus-pair:// 协议串')
+  }
+  const host = url.hostname
+  const port = Number(url.port)
+  const nonce = url.searchParams.get('n') ?? ''
+  const pairingSecret = url.searchParams.get('s') ?? ''
+  const pin = url.hash.replace(/^#/, '')
+  if (!host || !Number.isInteger(port) || port <= 0 || port > 65535) {
+    throw new Error('配对串缺少合法主机或端口')
+  }
+  if (!nonce || !pairingSecret || !/^\d{6}$/.test(pin)) {
+    throw new Error('配对串缺少 nonce / pairingSecret 或 6 位 PIN')
+  }
+  return { host, port, nonce, pairingSecret, pin }
 }
 
 export interface PairingInfo {

@@ -52,12 +52,13 @@ export interface DshSessionFile {
 
 const SESSIONS_DIR = join(homedir(), '.dsh', 'sessions')
 
-/** 解码 workspace 目录名（~0020 = 空格等 URL 编码片段） */
+/** 解码 workspace 目录名（~0020 = 空格、~XXXX = UTF-16 字符等编码片段） */
 function decodeWorkspaceDir(name: string): string {
   return name
-    .replace(/~0020/g, ' ')
-    .replace(/~002D/gi, '-')
-    .replace(/~005F/gi, '_')
+    .replace(/~([0-9A-Fa-f]{4})/g, (_, hex: string) => {
+      const code = parseInt(hex, 16)
+      return Number.isFinite(code) ? String.fromCharCode(code) : _
+    })
     .replace(/~2D/gi, '-')
     .replace(/~5F/gi, '_')
 }
@@ -123,7 +124,9 @@ export async function parseSessionFile(
 
     if (type === 'session') {
       if (typeof data.cwd === 'string') cwd = data.cwd
+      else if (typeof o.cwd === 'string') cwd = o.cwd
       if (typeof data.createdAt === 'number') createdAt = data.createdAt
+      else if (typeof o.createdAt === 'number') createdAt = o.createdAt
       continue
     }
     if (type === 'session/title' && typeof data.title === 'string' && data.title) {
@@ -137,10 +140,12 @@ export async function parseSessionFile(
         const output = usage.outputTokens | 0
         const reasoning = (usage.reasoningTokens ?? 0) | 0
         const cacheRead = (usage.cacheReadTokens ?? 0) | 0
+        const cacheWrite = (usage.cacheWriteTokens ?? 0) | 0
         tokens.input += input
         tokens.output += output
         tokens.reasoning += reasoning
         tokens.cacheRead += cacheRead
+        tokens.cacheWrite += cacheWrite
         const message = data.message as Record<string, unknown> | undefined
         const source = message?.source as Record<string, unknown> | undefined
         const model = typeof source?.model === 'string' && source.model ? source.model : 'unknown'
@@ -153,10 +158,10 @@ export async function parseSessionFile(
           outputTokens: output,
           reasoningTokens: reasoning,
           cacheReadTokens: cacheRead,
-          cacheWriteTokens: 0,
+          cacheWriteTokens: cacheWrite,
           sessionId,
           dedupeKey: `dsh:${sessionId}:${seq ?? `l${idx}`}`,
-          isEstimated: true
+          isEstimated: false
         })
       }
       continue
@@ -182,18 +187,23 @@ export async function parseSessionFile(
           cacheWriteTokens: 0,
           sessionId,
           dedupeKey: `dsh:${sessionId}:${seq ?? `l${idx}`}`,
-          isEstimated: true
+          isEstimated: false
         })
       }
       continue
     }
-    if (type === 'tool/call' && typeof data.name === 'string' && data.name) {
-      const callId = typeof data.callId === 'string' ? data.callId : null
+    if ((type === 'tool/call' || type === 'tool/ptc-dispatch') && typeof data.name === 'string' && data.name) {
+      const callId =
+        typeof data.callId === 'string'
+          ? data.callId
+          : typeof data.subCallId === 'string'
+            ? data.subCallId
+            : null
       toolRows.push({
         toolName: data.name.slice(0, 200),
-        ts: time ?? null,
+        ts: time ?? createdAt ?? fileMtimeMs,
         sessionId,
-        dedupeKey: callId ? `dsh:${sessionId}:tc:${callId}` : `dsh:${sessionId}:tcl${idx}`
+        dedupeKey: callId ? `dsh:${sessionId}:tc:${callId}` : `dsh:${sessionId}:tcl:${seq ?? idx}`
       })
       continue
     }
@@ -255,18 +265,23 @@ export class DshLocalSessionReader {
         continue
       }
       for (const sess of sessDirs) {
-        const zstdPath = join(wsdir, sess, 'session.jsonl.zstd')
-        try {
-          const st = statSync(zstdPath)
-          out.push({
-            path: zstdPath,
-            sessionId: sess.replace('session-', ''),
-            workspaceLabel: decodeWorkspaceDir(ws),
-            mtimeMs: st.mtimeMs,
-            size: st.size
-          })
-        } catch {
-          continue
+        const sessPath = join(wsdir, sess)
+        const sessionId = sess.replace('session-', '')
+        const workspaceLabel = decodeWorkspaceDir(ws)
+        for (const fname of ['session.v4.jsonl.zstd', 'session.jsonl.zstd']) {
+          const zstdPath = join(sessPath, fname)
+          try {
+            const st = statSync(zstdPath)
+            out.push({
+              path: zstdPath,
+              sessionId,
+              workspaceLabel,
+              mtimeMs: st.mtimeMs,
+              size: st.size
+            })
+          } catch {
+            continue
+          }
         }
       }
     }

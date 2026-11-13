@@ -19,6 +19,7 @@ export interface TokenTotals {
 export interface Overview {
   range: RangeKey
   agent: string | null
+  nodeId?: string | null
   totals: TokenTotals
   sessionCount: number
   toolCallCount: number
@@ -74,6 +75,10 @@ export interface AgentInfo {
   status: AgentStatus
   todayTokens: number
   todayRequests: number
+  /** 当前所选时间范围（range）内的 Token 消耗 */
+  rangeTokens?: number
+  /** 历史全量累计 Token 消耗 */
+  totalTokens?: number
   lastActivityAt: number | null
   sessionCount: number
   note: string | null // 如"无本地用量数据（云端存储）"
@@ -89,6 +94,8 @@ export interface SessionRow {
   updatedAt: number | null
   tokens: number
   requests: number
+  sourceNodeId?: string
+  sourceNodeLabel?: string
 }
 
 /** 看板全量数据（单遍扫描聚合，一次 IPC 代替 9 次独立查询） */
@@ -125,8 +132,96 @@ export interface SyncProgress {
   results: Array<{ agent: string; records: number; sessions: number; tools: number; error: string | null }>
 }
 
+export type UiStyle = 'nexus' | 'classic'
+
+export type NodeKind = 'physical' | 'vmware' | 'hyperv' | 'wsl2' | 'vm' | 'mac' | 'linux'
+export type NodeRole = 'hub' | 'spoke'
+export type LinkTransport = 'local' | 'lan' | 'vmware_nat' | 'wsl' | 'tailscale' | 'other'
+export type NodeOnlineStatus = 'online' | 'syncing' | 'offline'
+
+export interface NodeHardwareSummary {
+  osPlatform: string
+  osRelease: string
+  arch: string
+  cpuModel: string
+  cpuCores: number
+  cpuLoadPercent: number
+  ramTotalBytes: number
+  ramUsedBytes: number
+  ramUsedPercent: number
+  gpuModel: string | null
+  uptimeSec: number
+}
+
+export interface NodeIpHint {
+  host: string
+  transport: LinkTransport
+  label: string
+}
+
+export interface NodeProfile {
+  nodeId: string
+  hostname: string
+  alias: string | null
+  kind: NodeKind
+  role: NodeRole
+  ipHints: NodeIpHint[]
+  hwSummary: NodeHardwareSummary
+  activeAgents: string[]
+  updatedAt: number
+}
+
+export interface MeshWatermark {
+  usageId: number
+  toolId: number
+  sessionSeq: number
+}
+
+export interface MeshNodeInfo {
+  nodeId: string
+  hostname: string
+  alias: string | null
+  kind: NodeKind
+  role: NodeRole
+  isLocal: boolean
+  status: NodeOnlineStatus
+  transport: LinkTransport
+  endpoint: string | null
+  rttMs: number | null
+  lastSeenAt: number
+  ackedWatermark: MeshWatermark
+  recordCount: number
+  totalTokens: number
+  hwSummary: NodeHardwareSummary
+  activeAgents: string[]
+}
+
+export interface MeshHubConnectionConfig {
+  hubNodeId: string | null
+  deviceId: string
+  deviceName: string
+  hubUrl: string
+  token: string
+  pairedAt: number
+}
+
+export interface MeshStatusInfo {
+  localNode: MeshNodeInfo
+  nodes: MeshNodeInfo[]
+  hubConnection: {
+    connected: boolean
+    hubUrl: string | null
+    hubNodeId: string | null
+    lastSyncAt: number | null
+    ackedWatermark: MeshWatermark
+    lastError: string | null
+    rttMs: number | null
+  } | null
+}
+
 export interface Settings {
   theme: 'dark' | 'light'
+  uiStyle?: UiStyle
 }
 
 export interface TimeRange {
@@ -138,7 +233,13 @@ export interface TimeRange {
 // ── IPC 契约（renderer 经 window.nexus 调用）──
 export interface NexusApi {
   getOverview(range: RangeKey, agent: string | null): Promise<Overview>
-  getBoard(range: RangeKey, agent: string | null, customStart?: number, customEnd?: number): Promise<import('./types').BoardData>
+  getBoard(
+    range: RangeKey,
+    agent: string | null,
+    customStart?: number,
+    customEnd?: number,
+    nodeId?: string | null
+  ): Promise<import('./types').BoardData>
   getCustomRange(): Promise<{ start: number; end: number } | null>
   setCustomRange(start: number, end: number): Promise<{ start: number; end: number }>
   minimizeWindow(): Promise<void>
@@ -153,12 +254,34 @@ export interface NexusApi {
   getHeatmap(range: RangeKey, agent: string | null): Promise<HeatmapData>
   getCalendar(range: RangeKey, agent: string | null): Promise<CalendarDay[]>
   getToolStats(range: RangeKey, agent: string | null): Promise<ToolStat[]>
-  getAgents(): Promise<AgentInfo[]>
+  getAgents(
+    range?: RangeKey,
+    customStart?: number,
+    customEnd?: number,
+    nodeId?: string | null
+  ): Promise<AgentInfo[]>
   getSessions(range: RangeKey, agent: string | null, limit: number): Promise<SessionRow[]>
+  // Nexus Mesh（跨设备算力组网）
+  getMeshStatus(): Promise<MeshStatusInfo>
+  setLocalNodeAlias(alias: string | null): Promise<MeshStatusInfo>
+  setLocalNodeRole(role: NodeRole | null): Promise<MeshStatusInfo>
+  pairWithHub(input: {
+    uri?: string
+    host?: string
+    port?: number
+    pin?: string
+    nonce?: string
+    pairingSecret?: string
+  }): Promise<MeshStatusInfo>
+  disconnectHub(): Promise<MeshStatusInfo>
+  triggerMeshSync(): Promise<{ pushed: number; watermark: MeshWatermark }>
+  removeMeshNode(nodeId: string): Promise<MeshStatusInfo>
+  onMeshUpdate(cb: (status: MeshStatusInfo) => void): () => void
   getSyncStatus(): Promise<SyncProgress>
   syncNow(): Promise<void>
   getSettings(): Promise<Settings>
   setTheme(theme: Settings['theme']): Promise<Settings>
+  setUiStyle(style: UiStyle): Promise<Settings>
   getRetentionDays(): Promise<number>
   setRetentionDays(days: number): Promise<number>
   getDataDir(): Promise<string>

@@ -1,15 +1,30 @@
-import * as echarts from 'echarts'
+import * as echarts from 'echarts/core'
+import { BarChart, HeatmapChart, LineChart, PieChart } from 'echarts/charts'
+import { GridComponent, TooltipComponent, VisualMapComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+import type { EChartsOption } from 'echarts'
 import type { JSX } from 'react'
 import { useEffect, useRef } from 'react'
 
+echarts.use([
+  LineChart,
+  BarChart,
+  PieChart,
+  HeatmapChart,
+  GridComponent,
+  TooltipComponent,
+  VisualMapComponent,
+  CanvasRenderer
+])
+
 interface EChartProps {
-  option: echarts.EChartsOption
+  option: EChartsOption
   className?: string
   /** 图元点击回调（如饼图扇区下钻），参数为该图元的 name */
   onClick?: (name: string) => void
 }
 
-/** ECharts 薄封装：初始化一次，option 变化整体替换，随容器尺寸自适应。 */
+/** ECharts 薄封装：按需注册 4 类图表与核心组件，option 变化整体替换，随容器尺寸自适应。 */
 export function EChart({ option, className, onClick }: EChartProps): JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
   const chartRef = useRef<echarts.ECharts | null>(null)

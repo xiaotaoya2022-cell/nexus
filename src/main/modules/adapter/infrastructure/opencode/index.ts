@@ -67,6 +67,9 @@ export class OpencodeAdapter implements AgentAdapter {
     try {
       let records = 0
       let sessions = 0
+      let tools = 0
+      let lastToolTime =
+        typeof ctx.state.meta.lastToolTime === 'number' ? ctx.state.meta.lastToolTime : 0
 
       if (tableColumns(db, 'message').length > 0) {
         const rows = db
@@ -146,7 +149,49 @@ export class OpencodeAdapter implements AgentAdapter {
         }
       }
 
-      return { records, sessions, tools: 0, lastTs: ctx.now, meta: ctx.state.meta }
+      if (tableColumns(db, 'part').length > 0) {
+        const partRows = db
+          .prepare(
+            `SELECT id, session_id, time_created,
+                    json_extract(data, '$.tool') AS tool_name
+             FROM part
+             WHERE json_extract(data, '$.type') = 'tool'
+               AND time_created > ?
+             ORDER BY time_created ASC
+             LIMIT 20000`
+          )
+          .all(lastToolTime) as Array<{
+          id: string
+          session_id: string | null
+          time_created: number | null
+          tool_name: string | null
+        }>
+        const toolRows: Parameters<StoreWriter['insertToolCalls']>[0] = []
+        for (const p of partRows) {
+          const toolName =
+            typeof p.tool_name === 'string' && p.tool_name ? p.tool_name : 'tool'
+          const ts = typeof p.time_created === 'number' ? p.time_created : null
+          toolRows.push({
+            agent: this.id,
+            toolName: toolName.slice(0, 200),
+            ts,
+            sessionId: p.session_id,
+            dedupeKey: `opencode:part:${p.id}`
+          })
+          if (ts != null && ts > lastToolTime) lastToolTime = ts
+        }
+        if (toolRows.length > 0) {
+          tools = this.store.insertToolCalls(toolRows)
+        }
+      }
+
+      return {
+        records,
+        sessions,
+        tools,
+        lastTs: ctx.now,
+        meta: { ...ctx.state.meta, lastToolTime }
+      }
     } finally {
       db.close()
     }

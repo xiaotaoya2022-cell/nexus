@@ -17,7 +17,9 @@ export default defineConfig({
         input: {
           index: resolve(__dirname, 'src/main/index.ts'),
           smoke: resolve(__dirname, 'src/main/smoke.ts'),
-          'remote-smoke': resolve(__dirname, 'src/main/remote-smoke.ts')
+          'remote-smoke': resolve(__dirname, 'src/main/remote-smoke.ts'),
+          'mesh-smoke': resolve(__dirname, 'src/main/mesh-smoke.ts'),
+          'mesh-agent': resolve(__dirname, 'src/main/mesh-agent.ts')
         }
       }
     }

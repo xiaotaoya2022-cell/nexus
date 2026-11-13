@@ -54,6 +54,10 @@
   --nx-heat-2: color-mix(in oklab, #4099ff 42%, rgba(255, 255, 255, 0.05));
   --nx-heat-3: color-mix(in oklab, #4099ff 62%, rgba(255, 255, 255, 0.05));
   --nx-heat-4: color-mix(in oklab, #80beff 78%, rgba(255, 255, 255, 0.05));
+
+  --nx-signal: #4099ff;
+  --nx-signal-soft: rgba(64, 153, 255, 0.14);
+  --nx-cobalt: #4099ff;
 }
 
 /* ── 亮色（Zai Light 对照表）── */
@@ -104,6 +108,117 @@
   --nx-heat-2: color-mix(in oklab, #0b7fff 42%, rgba(13, 13, 13, 0.03));
   --nx-heat-3: color-mix(in oklab, #0b7fff 62%, rgba(13, 13, 13, 0.03));
   --nx-heat-4: color-mix(in oklab, #0b7fff 82%, rgba(13, 13, 13, 0.03));
+
+  --nx-signal: #0b7fff;
+  --nx-signal-soft: rgba(11, 127, 255, 0.12);
+  --nx-cobalt: #0b7fff;
+}
+
+/* ── Nexus Studio 视觉语言：Obsidian Studio（深色）+ Braun Warm Ceramic（亮色）── */
+.style-nexus.theme-dark {
+  --nx-background: #0b0d12;
+  --nx-panel: #10131a;
+  --nx-card: #161a24;
+  --nx-raised: #1e2432;
+
+  --nx-surface: rgba(235, 241, 255, 0.036);
+  --nx-surface-hover: rgba(235, 241, 255, 0.075);
+  --nx-hover: rgba(235, 241, 255, 0.045);
+  --nx-selected: rgba(235, 241, 255, 0.09);
+
+  --nx-foreground: #edf0f7;
+  --nx-foreground-subtle: rgba(237, 240, 247, 0.64);
+  --nx-foreground-subtlest: rgba(237, 240, 247, 0.38);
+  --nx-foreground-inverse: #0b0d12;
+
+  --nx-border: rgba(235, 241, 255, 0.09);
+  --nx-border-hover: rgba(235, 241, 255, 0.18);
+  --nx-hairline: rgba(235, 241, 255, 0.06);
+
+  --nx-brand: #edf0f7;
+  --nx-primary: #edf0f7;
+  --nx-primary-foreground: #0b0d12;
+  --nx-secondary: #1e2432;
+  --nx-focus-blue: #4b8bff;
+
+  --nx-signal: #ef4b1e;
+  --nx-signal-soft: rgba(239, 75, 30, 0.14);
+  --nx-cobalt: #4b8bff;
+
+  --nx-success: #2dd487;
+  --nx-warning: #f59e0b;
+  --nx-destructive: #f45858;
+  --nx-idle: #8b7cff;
+  --nx-success-surface: rgba(45, 212, 135, 0.14);
+  --nx-warning-surface: rgba(245, 158, 11, 0.14);
+  --nx-destructive-surface: rgba(244, 88, 88, 0.14);
+  --nx-idle-surface: rgba(139, 124, 255, 0.15);
+
+  --nx-chart-1: #ef4b1e;
+  --nx-chart-2: #4b8bff;
+  --nx-chart-3: #2dd487;
+  --nx-chart-4: #f59e0b;
+  --nx-chart-5: #9d86ff;
+  --nx-chart-6: #38bdf8;
+
+  --nx-heat-0: rgba(235, 241, 255, 0.045);
+  --nx-heat-1: rgba(239, 75, 30, 0.24);
+  --nx-heat-2: rgba(239, 75, 30, 0.44);
+  --nx-heat-3: rgba(239, 75, 30, 0.68);
+  --nx-heat-4: #ef4b1e;
+}
+
+.style-nexus.theme-light {
+  --nx-background: #eceae3;
+  --nx-panel: #f5f4ef;
+  --nx-card: #ffffff;
+  --nx-raised: #e6e3da;
+
+  --nx-surface: rgba(255, 255, 255, 0.72);
+  --nx-surface-hover: rgba(18, 22, 28, 0.055);
+  --nx-hover: rgba(18, 22, 28, 0.045);
+  --nx-selected: rgba(18, 22, 28, 0.085);
+
+  --nx-foreground: #17191e;
+  --nx-foreground-subtle: rgba(23, 25, 30, 0.62);
+  --nx-foreground-subtlest: rgba(23, 25, 30, 0.4);
+  --nx-foreground-inverse: #ffffff;
+
+  --nx-border: rgba(23, 25, 30, 0.11);
+  --nx-border-hover: rgba(23, 25, 30, 0.2);
+  --nx-hairline: rgba(23, 25, 30, 0.075);
+
+  --nx-brand: #17191e;
+  --nx-primary: #17191e;
+  --nx-primary-foreground: #ffffff;
+  --nx-secondary: #e6e3da;
+  --nx-focus-blue: #1d4ed8;
+
+  --nx-signal: #e34216;
+  --nx-signal-soft: rgba(227, 66, 22, 0.11);
+  --nx-cobalt: #1d4ed8;
+
+  --nx-success: #15803d;
+  --nx-warning: #d97706;
+  --nx-destructive: #dc2626;
+  --nx-idle: #7c3aed;
+  --nx-success-surface: rgba(21, 128, 61, 0.11);
+  --nx-warning-surface: rgba(217, 119, 6, 0.11);
+  --nx-destructive-surface: rgba(220, 38, 38, 0.1);
+  --nx-idle-surface: rgba(124, 58, 237, 0.11);
+
+  --nx-chart-1: #e34216;
+  --nx-chart-2: #1d4ed8;
+  --nx-chart-3: #15803d;
+  --nx-chart-4: #d97706;
+  --nx-chart-5: #7c3aed;
+  --nx-chart-6: #0e7490;
+
+  --nx-heat-0: rgba(23, 25, 30, 0.055);
+  --nx-heat-1: rgba(227, 66, 22, 0.22);
+  --nx-heat-2: rgba(227, 66, 22, 0.42);
+  --nx-heat-3: rgba(227, 66, 22, 0.68);
+  --nx-heat-4: #e34216;
 }
 
 @theme inline {
@@ -128,6 +243,9 @@
   --color-primary-foreground: var(--nx-primary-foreground);
   --color-secondary: var(--nx-secondary);
   --color-focus-blue: var(--nx-focus-blue);
+  --color-signal: var(--nx-signal);
+  --color-signal-soft: var(--nx-signal-soft);
+  --color-cobalt: var(--nx-cobalt);
   --color-success: var(--nx-success);
   --color-warning: var(--nx-warning);
   --color-destructive: var(--nx-destructive);
@@ -255,4 +373,238 @@ header input,
 header a,
 header [role='button'] {
   -webkit-app-region: no-drag;
+}
+
+/* ── Nexus Studio 材质高光与微景深（仅 .style-nexus 生效，.style-classic 保持零样式侵入）── */
+.style-nexus.theme-dark .nx-shell-bg {
+  background-image:
+    radial-gradient(880px 360px at 14% -8%, rgba(239, 75, 30, 0.055), transparent 60%),
+    radial-gradient(760px 420px at 94% 108%, rgba(75, 139, 255, 0.045), transparent 62%);
+}
+
+.style-nexus.theme-light .nx-shell-bg {
+  background-image:
+    radial-gradient(960px 420px at 16% -6%, rgba(255, 255, 255, 0.72), transparent 64%),
+    radial-gradient(720px 360px at 92% 104%, rgba(227, 66, 22, 0.03), transparent 60%);
+}
+
+.style-nexus.theme-dark .nx-card-elevated {
+  border: 1px solid var(--nx-border);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.055),
+    0 1px 2px rgba(0, 0, 0, 0.28);
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.style-nexus.theme-dark .nx-card-elevated:hover {
+  border-color: var(--nx-border-hover);
+}
+
+.style-nexus.theme-light .nx-card-elevated {
+  border: 1px solid var(--nx-border);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    0 1px 3px rgba(23, 25, 30, 0.045);
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.style-nexus.theme-light .nx-card-elevated:hover {
+  border-color: var(--nx-border-hover);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 2px 6px rgba(23, 25, 30, 0.07);
+}
+
+.style-nexus.theme-dark .nx-kpi-card {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.025) 0%, transparent 100%);
+}
+
+.style-nexus.theme-light .nx-kpi-card {
+  background-image: linear-gradient(180deg, #ffffff 0%, #faf9f5 100%);
+}
+
+.style-nexus .nx-kpi-val {
+  font-size: calc(var(--ui-font-size) + 8px);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.15;
+}
+
+.nx-only,
+.nx-only-block {
+  display: none;
+}
+
+.style-nexus .nx-only {
+  display: inline-flex;
+}
+
+.style-nexus .nx-only-block {
+  display: block;
+}
+
+.style-nexus .nx-nav-active {
+  box-shadow: inset 2.5px 0 0 var(--nx-signal);
+}
+
+/* ── 丝滑列表高亮光标与弹簧药丸指示器 ── */
+:root {
+  --nx-spring-sel: linear(
+    0, 0.011 1.1%, 0.044 2.2%, 0.172 4.7%, 0.483 9.7%, 0.659 13%, 0.803 16.5%,
+    0.903 20%, 0.968 23.7%, 1.003 27.5%, 1.018 31.6%, 1.021 36%, 1.011 49%,
+    1.003 77%, 1 100%
+  );
+  --nx-spring-chip: linear(
+    0, 0.01 1%, 0.041 2.1%, 0.165 4.5%, 0.491 9.5%, 0.674 12.7%, 0.822 16.1%,
+    0.922 19.6%, 0.985 23.2%, 1.018 27%, 1.031 31.2%, 1.031 35.6%, 1.013 48.2%,
+    1.002 74%, 1 100%
+  );
+}
+
+.nx-list-host [data-list-row] {
+  position: relative;
+}
+
+.nx-list-host [data-list-row]:hover,
+.nx-list-host [data-list-row][data-active='true'] {
+  background-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.nx-list-plate-hover,
+.nx-list-plate-sel {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  opacity: 0;
+  will-change: transform, width, height, opacity;
+  transform: translate3d(0, 0, 0);
+}
+
+.nx-list-plate-hover {
+  z-index: -2;
+  background-color: var(--nx-surface-hover);
+  transition:
+    transform 140ms ease-out,
+    width 140ms ease-out,
+    height 140ms ease-out,
+    opacity 120ms ease-out;
+}
+
+.nx-list-plate-sel {
+  z-index: -1;
+  background-color: var(--nx-selected);
+  transition:
+    transform 160ms var(--nx-spring-sel),
+    width 160ms var(--nx-spring-sel),
+    height 160ms var(--nx-spring-sel),
+    opacity 120ms ease-out;
+}
+
+.style-nexus .nx-list-plate-sel {
+  box-shadow: inset 2.5px 0 0 var(--nx-signal);
+}
+
+.nx-tab-pill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0;
+  will-change: transform, width, height, opacity;
+  transform: translate3d(0, 0, 0);
+  transition:
+    transform 240ms var(--nx-spring-chip),
+    width 240ms var(--nx-spring-chip),
+    height 240ms var(--nx-spring-chip),
+    opacity 120ms ease-out;
+}
+
+.style-nexus .nx-tab-pill {
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.style-nexus.theme-light .nx-tab-pill {
+  box-shadow:
+    0 1px 2px rgba(23, 25, 30, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+/* ── 自定义弹簧鼠标光标（移植自 ApiSpace，六态接管 + 局部预览）── */
+.nx-cursor {
+  pointer-events: none;
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 9999;
+  border-radius: 9999px;
+  border: 0 solid var(--nx-foreground);
+  background: color-mix(in srgb, var(--nx-foreground) 84%, transparent);
+  will-change: transform;
+  transition:
+    width 150ms ease-out,
+    height 150ms ease-out,
+    border-radius 150ms ease-out,
+    border-width 150ms ease-out,
+    background-color 150ms ease-out;
+}
+
+.nx-cursor.nx-interactive {
+  background: transparent;
+  border-color: var(--nx-foreground);
+}
+
+.style-nexus .nx-cursor.nx-interactive {
+  border-color: color-mix(in srgb, var(--nx-foreground) 72%, var(--nx-signal));
+}
+
+.nx-cursor.nx-text {
+  background: var(--nx-foreground);
+}
+
+.nx-cursor.nx-text::before,
+.nx-cursor.nx-text::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  width: 7px;
+  height: 1.5px;
+  background: var(--nx-foreground);
+  transform: translateX(-50%);
+}
+
+.nx-cursor.nx-text::before {
+  top: -2.5px;
+}
+
+.nx-cursor.nx-text::after {
+  bottom: -2.5px;
+}
+
+.nx-cursor-host {
+  cursor: none;
+}
+
+.nx-cursor-host :is(input, textarea, select, button, a):hover {
+  cursor: auto;
+}
+
+html.nx-cursor-global-host,
+html.nx-cursor-global-host * {
+  cursor: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nx-list-plate-hover,
+  .nx-list-plate-sel,
+  .nx-tab-pill {
+    transition: none !important;
+  }
+  .nx-cursor {
+    display: none !important;
+  }
 }

@@ -5,6 +5,7 @@ import type { ReactNode } from 'react'
 import type { JSX } from 'react'
 import type { AgentStatus, RangeKey } from '@shared/types'
 import { t, useLang } from '../i18n'
+import { SlidingTabIndicator } from './SmoothHighlight'
 
 /** 状态文案：渲染期走 t()（语言切换即时生效） */
 export function statusText(status: AgentStatus): string {
@@ -27,17 +28,55 @@ export function StatusDot({ status }: { status: AgentStatus }): JSX.Element {
 export function KpiCard({
   label,
   value,
-  sub
+  sub,
+  indexTag,
+  accent,
+  progressPct
 }: {
   label: string
   value: ReactNode
   sub?: ReactNode
+  indexTag?: string
+  accent?: 'signal' | 'cobalt' | 'success'
+  progressPct?: number
 }): JSX.Element {
+  const accentColor =
+    accent === 'signal'
+      ? 'var(--nx-signal)'
+      : accent === 'cobalt'
+        ? 'var(--nx-cobalt)'
+        : accent === 'success'
+          ? 'var(--nx-success)'
+          : undefined
   return (
-    <div className="flex flex-col gap-2 rounded-xl border border-border bg-card px-4 py-3">
-      <div className="text-ui-xs font-medium text-foreground-subtle">{label}</div>
-      <div className="font-mono text-ui-lg tabular-nums text-foreground">{value}</div>
+    <div className="nx-card-elevated nx-kpi-card relative flex flex-col gap-2 overflow-hidden rounded-xl border border-border bg-card px-4 py-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-ui-xs font-medium text-foreground-subtle">{label}</div>
+        {(indexTag || accentColor) && (
+          <div className="nx-only items-center gap-1.5 font-mono text-[10px] tracking-wider text-foreground-subtlest">
+            {accentColor && (
+              <span
+                className="h-1.5 w-1.5 rounded-full"
+                style={{ backgroundColor: accentColor }}
+              />
+            )}
+            {indexTag && <span>{indexTag}</span>}
+          </div>
+        )}
+      </div>
+      <div className="nx-kpi-val font-mono text-ui-lg tabular-nums text-foreground">{value}</div>
       {sub != null && <div className="text-ui-xs text-foreground-subtlest">{sub}</div>}
+      {typeof progressPct === 'number' && Number.isFinite(progressPct) && (
+        <div className="nx-only-block absolute inset-x-0 bottom-0 h-[2px] bg-hairline">
+          <div
+            className="h-full transition-[width] duration-300"
+            style={{
+              width: `${Math.max(4, Math.min(100, Math.round(progressPct)))}%`,
+              backgroundColor: accentColor ?? 'var(--nx-signal)'
+            }}
+          />
+        </div>
+      )}
     </div>
   )
 }
@@ -56,7 +95,9 @@ export function ChartCard({
   className?: string
 }): JSX.Element {
   return (
-    <section className={`flex flex-col gap-3 rounded-xl bg-surface p-4 ${className ?? ''}`}>
+    <section
+      className={`nx-card-elevated flex flex-col gap-3 rounded-xl bg-surface p-4 ${className ?? ''}`}
+    >
       <header className="flex items-center justify-between gap-2">
         <h2 className="text-ui-base font-medium text-foreground">{title}</h2>
         {actions}
@@ -88,21 +129,24 @@ export function PillSwitcher<T extends string>({
   onChange: (v: T) => void
 }): JSX.Element {
   return (
-    <div className="flex h-7 items-center rounded-full bg-surface p-0.5">
-      {options.map((o) => (
-        <button
-          key={o.key}
-          type="button"
-          onClick={() => onChange(o.key)}
-          className={`h-6 rounded-full px-2.5 text-ui-sm transition-colors duration-150 ${
-            value === o.key
-              ? 'bg-raised font-medium text-foreground'
-              : 'text-foreground-subtle hover:text-foreground'
-          }`}
-        >
-          {o.label}
-        </button>
-      ))}
+    <div className="relative isolate flex h-7 items-center rounded-full bg-surface p-0.5">
+      <SlidingTabIndicator activeSelector='button[data-active="true"]' />
+      {options.map((o) => {
+        const active = value === o.key
+        return (
+          <button
+            key={o.key}
+            type="button"
+            data-active={active ? 'true' : undefined}
+            onClick={() => onChange(o.key)}
+            className={`relative z-10 h-6 cursor-pointer rounded-full px-2.5 text-ui-sm transition-colors duration-150 ${
+              active ? 'font-medium text-foreground' : 'text-foreground-subtle hover:text-foreground'
+            }`}
+          >
+            {o.label}
+          </button>
+        )
+      })}
     </div>
   )
 }

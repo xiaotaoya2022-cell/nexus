@@ -1,9 +1,9 @@
 // 适配器基础设施：文件扫描、JSONL 增量读取、时间戳解析、只读 SQLite 打开。
 
 import { DatabaseSync } from 'node:sqlite'
-import { readdirSync, statSync } from 'node:fs'
+import { createReadStream, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { createReadStream } from 'node:fs'
+import { zstdDecompressSync } from 'node:zlib'
 
 /** 打开只读 SQLite（readOnly 语义等价 mode=ro，绝不写用户数据）。
  * busy_timeout=5s：外部库（如 ZCode）处于活动 WAL 写入中，避免偶发 SQLITE_BUSY。 */
@@ -52,6 +52,11 @@ export function parseTimestampMs(value: unknown): number | null {
 
 /** 递归收集匹配后缀的文件（限制深度，避免扫爆大目录） */
 export function collectFiles(root: string, suffix: string, maxDepth = 4): string[] {
+  return collectFilesMulti(root, [suffix], maxDepth)
+}
+
+/** 递归收集匹配任一后缀的文件 */
+export function collectFilesMulti(root: string, suffixes: string[], maxDepth = 4): string[] {
   const out: string[] = []
   const walk = (dir: string, depth: number): void => {
     if (depth > maxDepth) return
@@ -70,11 +75,77 @@ export function collectFiles(root: string, suffix: string, maxDepth = 4): string
         continue
       }
       if (st.isDirectory()) walk(full, depth + 1)
-      else if (name.endsWith(suffix)) out.push(full)
+      else if (suffixes.some((s) => name.endsWith(s))) out.push(full)
     }
   }
   walk(root, 0)
   return out
+}
+
+const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])
+
+/**
+ * 解压单帧或多帧拼接（multi-frame append log）Zstandard 缓冲区。
+ * DSH v4（.jsonl.zstd）与新版 Codex（.jsonl.zst）均采用 Zstd 帧格式。
+ */
+export function decompressZstdBuffer(buf: Buffer): string {
+  if (typeof zstdDecompressSync !== 'function' || buf.length === 0) return ''
+  const offsets: number[] = []
+  let idx = 0
+  while ((idx = buf.indexOf(ZSTD_MAGIC, idx)) !== -1) {
+    offsets.push(idx)
+    idx += 4
+  }
+  if (offsets.length === 0) {
+    try {
+      return zstdDecompressSync(buf).toString('utf8')
+    } catch {
+      return ''
+    }
+  }
+  if (offsets.length === 1) {
+    try {
+      return zstdDecompressSync(buf.subarray(offsets[0])).toString('utf8')
+    } catch {
+      return ''
+    }
+  }
+  const chunks: string[] = []
+  for (let i = 0; i < offsets.length; i++) {
+    const start = offsets[i]
+    const end = i + 1 < offsets.length ? offsets[i + 1] : buf.length
+    try {
+      chunks.push(zstdDecompressSync(buf.subarray(start, end)).toString('utf8'))
+    } catch {
+      // 若压缩载荷内巧合出现魔数字节，尝试向后合并帧边界
+      for (let j = i + 1; j < offsets.length; j++) {
+        const nextEnd = j + 1 < offsets.length ? offsets[j + 1] : buf.length
+        try {
+          chunks.push(zstdDecompressSync(buf.subarray(start, nextEnd)).toString('utf8'))
+          i = j
+          break
+        } catch {
+          // continue searching
+        }
+      }
+    }
+  }
+  return chunks.join('\n')
+}
+
+/** 读取 .jsonl 或 .jsonl.zst / .jsonl.zstd 文件的全部非空行 */
+export function readJsonlOrZstdLines(filePath: string): string[] {
+  try {
+    if (filePath.endsWith('.zst') || filePath.endsWith('.zstd')) {
+      const raw = decompressZstdBuffer(readFileSync(filePath))
+      return raw.split('\n').filter((l) => l.trim().length > 0)
+    }
+    return readFileSync(filePath, 'utf8')
+      .split('\n')
+      .filter((l) => l.trim().length > 0)
+  } catch {
+    return []
+  }
 }
 
 /**

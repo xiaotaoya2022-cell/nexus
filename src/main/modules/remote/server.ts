@@ -5,27 +5,41 @@
 // - 公网场景建议 Tailscale 组网后复用同一协议（草案 §备通道）
 
 import { WebSocketServer, WebSocket } from 'ws'
+import type { IncomingMessage } from 'node:http'
 import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto'
 import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
+import os from 'node:os'
 import type {
+  MeshHeartbeatRequest,
+  MeshHeartbeatResult,
+  MeshIngestBatch,
+  MeshPeerSummary,
+  MeshRegisterRequest,
+  MeshRegisterResult,
   PairRequest,
   PushChannel,
   RemoteMethod,
   RemoteStatusInfo,
   RequestFrame
 } from '@shared/protocol'
-import type { RangeKey } from '@shared/types'
+import type { LinkTransport, NodeProfile, RangeKey } from '@shared/types'
 import type { NexusStore } from '@main/modules/aggregator/infrastructure/store'
 import type { QueryService } from '@main/modules/aggregator/application/query-service'
 import type { SystemCollector } from '@main/modules/system/collector'
 import type { ZcodeManager } from '@main/modules/zcode/manager'
 import type { DshBridge } from '@main/modules/dsh/bridge'
+import {
+  inferPeerTransport,
+  listNetworkIpHints,
+  type NodeIdentityService
+} from '@main/modules/mesh/identity'
 import { logger } from '@main/modules/shared/logger'
 
 const PAIR_PIN_TTL_MS = 60_000
 const MAX_FRAME_BYTES = 256 * 1024
-const RATE_LIMIT_PER_MIN = 120
+const RATE_LIMIT_PER_MIN = 240
+const INGEST_RATE_LIMIT_PER_MIN = 1500
 
 interface DeviceRecord {
   deviceId: string
@@ -38,8 +52,12 @@ interface DeviceRecord {
 
 interface ConnState {
   deviceId: string | null
+  meshNodeId: string | null
+  remoteIp: string | null
+  transport: LinkTransport | null
   channels: Set<PushChannel>
   reqTimestamps: number[]
+  ingestTimestamps: number[]
   authNonce: string | null
 }
 
@@ -55,6 +73,9 @@ interface Deps {
   zcode: ZcodeManager
   dsh: DshBridge
   userDataDir: string
+  identity?: NodeIdentityService
+  getActiveAgents?: () => string[]
+  onMeshChanged?: () => void
   onAlert?: (alert: { level: 'warn' | 'error'; title: string; body: string }) => void
   onPaired?: (deviceId: string, deviceName: string) => void
 }
@@ -74,7 +95,10 @@ const ALL_CAPABILITIES: RemoteMethod[] = [
   'dsh.prompt',
   'dsh.cancel',
   'device.list',
-  'device.revoke'
+  'device.revoke',
+  'mesh.register',
+  'mesh.heartbeat',
+  'mesh.ingest'
 ]
 
 export class RemoteServer {
@@ -125,26 +149,52 @@ export class RemoteServer {
     if (this.wss) return
     this.enabled = true
     this.deps.store.setSetting('remoteEnabled', '1')
+    const savedPort = Number(this.deps.store.getSetting('remotePort') ?? 0)
+    const preferred = Number.isInteger(savedPort) && savedPort > 0 && savedPort <= 65535 ? savedPort : 0
+    this.bindServer(preferred)
+  }
+
+  private bindServer(requestedPort: number): void {
     // 红蓝审计 P2-2：maxPayload 收紧到 256KB（帧上限在协议层之前生效）；
     // 浏览器发起的跨站 WS（带 http/https Origin）在握手期直接拒绝
-    this.wss = new WebSocketServer({
+    const wss = new WebSocketServer({
       host: '0.0.0.0',
-      port: 0,
+      port: requestedPort,
       maxPayload: MAX_FRAME_BYTES,
       verifyClient: (info: { origin?: string; req: { headers: Record<string, unknown> } }) => {
         const origin = info.req.headers.origin
         return origin == null || !/^https?:\/\//i.test(String(origin))
       }
     })
-    this.wss.on('listening', () => {
-      const addr = this.wss?.address()
+    this.wss = wss
+    wss.on('error', (err: NodeJS.ErrnoException) => {
+      if (requestedPort !== 0 && err.code === 'EADDRINUSE' && this.enabled) {
+        logger.warn('remote.port_in_use_fallback', { requestedPort })
+        this.wss = null
+        try {
+          wss.close()
+        } catch {
+          // 忽略关闭异常
+        }
+        this.bindServer(0)
+        return
+      }
+      logger.warn('remote.server_error', { error: err.message })
+    })
+    wss.on('listening', () => {
+      const addr = wss.address()
       this.port = typeof addr === 'object' && addr ? addr.port : null
+      if (this.port != null) {
+        this.deps.store.setSetting('remotePort', String(this.port))
+      }
       // eslint-disable-next-line no-console
       console.log(`[remote] listening on ${this.port}`)
       logger.info('remote.started', { port: this.port })
     })
-    this.wss.on('connection', (ws) => this.onConnection(ws))
-    this.pushTimer = setInterval(() => void this.pushTick(), 2000)
+    wss.on('connection', (ws, req) => this.onConnection(ws, req))
+    if (!this.pushTimer) {
+      this.pushTimer = setInterval(() => void this.pushTick(), 2000)
+    }
   }
 
   stop(): void {
@@ -166,21 +216,29 @@ export class RemoteServer {
     pin: string
     nonce: string
     pairingSecret: string
-    addresses: Array<{ host: string; label: string; uri: string }>
+    addresses: Array<{ host: string; label: string; transport?: LinkTransport; uri: string }>
     qrDataUrl: string | null
     expiresAt: number
   }> {
+    if (!this.wss) this.start()
+    for (let i = 0; i < 40 && this.port == null; i++) {
+      await new Promise((r) => setTimeout(r, 50))
+    }
     const pin = String(randomInt(0, 1_000_000)).padStart(6, '0')
     this.pairNonce = randomBytes(16).toString('hex')
     this.pairingSecret = randomBytes(32).toString('hex')
     this.pin = pin
     this.pinExpiresAt = Date.now() + PAIR_PIN_TTL_MS
     this.pairFailures = 0
-    // 候选地址：全部非环回 IPv4（局域网 + Tailscale 100.x 等虚拟网卡），跨网时选 Tailscale 地址
+    // 候选地址：全部非环回 IPv4（局域网 / Tailscale 100.x / VMware NAT / WSL vSwitch）
     const addresses = this.candidateAddresses()
+    const baseAddrs =
+      addresses.length > 0
+        ? addresses
+        : [{ host: '127.0.0.1', label: '本机回环', transport: 'local' as const }]
     const buildUri = (host: string): string =>
       `nexus-pair://${host}:${this.port ?? 0}?n=${this.pairNonce}&s=${this.pairingSecret}#${pin}`
-    const addressList = addresses.map((a) => ({ ...a, uri: buildUri(a.host) }))
+    const addressList = baseAddrs.map((a) => ({ ...a, uri: buildUri(a.host) }))
     let qr: string | null = null
     try {
       const qrLib = await import('qrcode')
@@ -202,27 +260,9 @@ export class RemoteServer {
     }
   }
 
-  /** 全部非环回 IPv4 候选（标注网段类型；Tailscale = 100.64/10 CGNAT 段） */
-  private candidateAddresses(): Array<{ host: string; label: string }> {
-    const osInfo = require('node:os') as typeof import('node:os')
-    const out: Array<{ host: string; label: string }> = []
-    const seen = new Set<string>()
-    for (const list of Object.values(osInfo.networkInterfaces())) {
-      for (const ni of list ?? []) {
-        if (ni.family !== 'IPv4' || ni.internal) continue
-        const ip = ni.address
-        if (seen.has(ip)) continue
-        seen.add(ip)
-        const label = ip.startsWith('100.')
-          ? 'Tailscale/虚拟网（跨网用）'
-          : ip.startsWith('192.168.') || ip.startsWith('10.') || ip.startsWith('172.')
-            ? '局域网'
-            : '其他网络'
-        out.push({ host: ip, label })
-      }
-    }
-    // Tailscale/虚拟网排前，跨网场景优先
-    return out.sort((a, b) => Number(b.label.includes('Tailscale')) - Number(a.label.includes('Tailscale')))
+  /** 全部非环回 IPv4 候选（复用 Mesh 网络接口识别逻辑） */
+  private candidateAddresses(): Array<{ host: string; label: string; transport: LinkTransport }> {
+    return listNetworkIpHints()
   }
 
   status(): RemoteStatus {
@@ -245,14 +285,39 @@ export class RemoteServer {
     }
   }
 
+  /** 查询当前直连在线的 Mesh 节点链路详情 */
+  getConnectedMeshNodes(): Map<string, { endpoint: string | null; transport: LinkTransport | null }> {
+    const map = new Map<string, { endpoint: string | null; transport: LinkTransport | null }>()
+    for (const st of this.conns.values()) {
+      if (st.deviceId && st.meshNodeId) {
+        map.set(st.meshNodeId, {
+          endpoint: st.remoteIp,
+          transport: st.transport
+        })
+      }
+    }
+    return map
+  }
+
   // ── 连接处理 ──
-  private onConnection(ws: WebSocket): void {
+  private onConnection(ws: WebSocket, req?: IncomingMessage): void {
     // 红蓝审计 P2-1：并发连接上限
     if (this.conns.size >= MAX_CONNS) {
       ws.close()
       return
     }
-    const state: ConnState = { deviceId: null, channels: new Set(), reqTimestamps: [], authNonce: null }
+    const rawIp = req?.socket?.remoteAddress ?? null
+    const cleanIp = rawIp ? rawIp.replace(/^::ffff:/, '') : null
+    const state: ConnState = {
+      deviceId: null,
+      meshNodeId: null,
+      remoteIp: cleanIp,
+      transport: null,
+      channels: new Set(),
+      reqTimestamps: [],
+      ingestTimestamps: [],
+      authNonce: null
+    }
     // 未鉴权连接 60s 强制断开（防空连接占满）
     const authKick = setTimeout(() => {
       if (state.deviceId == null) ws.close()
@@ -263,18 +328,22 @@ export class RemoteServer {
     this.lastConnOpenAt = Date.now()
     // eslint-disable-next-line no-console
     console.log('[remote] conn_open')
-    logger.info('remote.conn_open', { total: this.conns.size })
+    logger.info('remote.conn_open', { total: this.conns.size, ip: cleanIp })
     ws.on('close', (code, reason) => {
       // eslint-disable-next-line no-console
       console.log(`[remote] conn_close code=${code}`)
       logger.info('remote.conn_close', { code, reason: reason.toString().slice(0, 100) })
+      const hadMesh = Boolean(state.meshNodeId)
       this.conns.delete(ws)
+      if (hadMesh) this.deps.onMeshChanged?.()
     })
     ws.on('error', (err) => {
       // eslint-disable-next-line no-console
       console.log(`[remote] conn_error ${err.message}`)
       logger.warn('remote.conn_error', { error: err.message })
+      const hadMesh = Boolean(state.meshNodeId)
       this.conns.delete(ws)
+      if (hadMesh) this.deps.onMeshChanged?.()
     })
     ws.on('message', (data) => {
       try {
@@ -288,7 +357,7 @@ export class RemoteServer {
           this.sendErr(ws, '?', 'BAD_REQUEST', '帧格式错误')
           return
         }
-        if (!this.rateCheck(state)) {
+        if (!this.rateCheck(state, frame.method)) {
           this.sendErr(ws, frame.id, 'RATE_LIMITED', '请求过于频繁')
           return
         }
@@ -299,8 +368,14 @@ export class RemoteServer {
     })
   }
 
-  private rateCheck(state: ConnState): boolean {
+  private rateCheck(state: ConnState, method?: RemoteMethod): boolean {
     const now = Date.now()
+    if (method === 'mesh.ingest') {
+      state.ingestTimestamps = state.ingestTimestamps.filter((t) => now - t < 60_000)
+      if (state.ingestTimestamps.length >= INGEST_RATE_LIMIT_PER_MIN) return false
+      state.ingestTimestamps.push(now)
+      return true
+    }
     state.reqTimestamps = state.reqTimestamps.filter((t) => now - t < 60_000)
     if (state.reqTimestamps.length >= RATE_LIMIT_PER_MIN) return false
     state.reqTimestamps.push(now)
@@ -432,6 +507,12 @@ export class RemoteServer {
           this.sendErr(ws, frame.id, 'CAPABILITY_DENIED', '远程吊销请在 PC 端操作')
           return
         }
+        case 'mesh.register':
+          return this.handleMeshRegister(ws, state, frame)
+        case 'mesh.heartbeat':
+          return this.handleMeshHeartbeat(ws, state, frame)
+        case 'mesh.ingest':
+          return this.handleMeshIngest(ws, state, frame)
         default:
           this.sendErr(ws, frame.id, 'NOT_FOUND', `未知方法 ${String(method)}`)
       }
@@ -594,6 +675,173 @@ export class RemoteServer {
 
   get isEnabled(): boolean {
     return this.enabled
+  }
+
+  /** 构建 Hub 端 NodeProfile 与 Mesh 节点摘要列表（供注册/心跳回传） */
+  private async buildHubProfileSnapshot(): Promise<NodeProfile> {
+    const active = this.deps.getActiveAgents?.() ?? []
+    const snap = await Promise.race([
+      this.deps.system.snapshot().catch(() => null),
+      new Promise<null>((r) => setTimeout(() => r(null), 500))
+    ])
+    if (this.deps.identity) {
+      return this.deps.identity.buildProfile(snap, active)
+    }
+    const cpus = os.cpus()
+    const totalMem = os.totalmem()
+    const usedMem = Math.max(0, totalMem - os.freemem())
+    return {
+      nodeId: 'hub_local',
+      hostname: os.hostname(),
+      alias: null,
+      kind: 'physical',
+      role: 'hub',
+      ipHints: listNetworkIpHints(),
+      hwSummary: {
+        osPlatform: process.platform,
+        osRelease: os.release(),
+        arch: process.arch,
+        cpuModel: snap?.cpu.model ?? cpus[0]?.model ?? process.arch,
+        cpuCores: snap?.cpu.cores ?? (cpus.length || 1),
+        cpuLoadPercent: snap?.cpu.loadPercent ?? 0,
+        ramTotalBytes: snap?.memory.totalBytes ?? totalMem,
+        ramUsedBytes: snap?.memory.usedBytes ?? usedMem,
+        ramUsedPercent: snap?.memory.usedPercent ?? 0,
+        gpuModel: snap?.gpus[0]?.model ?? null,
+        uptimeSec: snap?.uptimeSec ?? Math.floor(os.uptime())
+      },
+      activeAgents: active,
+      updatedAt: Date.now()
+    }
+  }
+
+  private listPeerSummaries(): MeshPeerSummary[] {
+    return this.deps.store.listMeshNodeRecords().map((n) => ({
+      nodeId: n.nodeId,
+      hostname: n.hostname,
+      alias: n.alias,
+      kind: n.kind,
+      role: n.role,
+      transport: n.transport,
+      rttMs: n.rttMs,
+      lastSeenAt: n.lastSeenAt
+    }))
+  }
+
+  private async handleMeshRegister(ws: WebSocket, state: ConnState, frame: RequestFrame): Promise<void> {
+    const p = frame.payload as Partial<MeshRegisterRequest>
+    const prof = p?.profile
+    if (!prof || typeof prof.nodeId !== 'string' || !prof.nodeId || prof.nodeId === 'local') {
+      this.sendErr(ws, frame.id, 'BAD_REQUEST', '节点 profile.nodeId 无效')
+      return
+    }
+    if (this.deps.identity && prof.nodeId === this.deps.identity.nodeId) {
+      this.sendErr(ws, frame.id, 'BAD_REQUEST', '节点不能与自身配对')
+      return
+    }
+    const transport = inferPeerTransport(state.remoteIp, prof)
+    state.meshNodeId = prof.nodeId
+    state.transport = transport
+    this.deps.store.upsertMeshNode({
+      nodeId: prof.nodeId,
+      hostname: String(prof.hostname || 'unknown').slice(0, 64),
+      alias: prof.alias ?? null,
+      kind: prof.kind,
+      role: prof.role === 'hub' ? 'spoke' : prof.role,
+      transport,
+      endpoint: state.remoteIp ?? prof.ipHints[0]?.host ?? null,
+      lastSeenAt: Date.now(),
+      hwSummary: prof.hwSummary ?? null,
+      activeAgents: Array.isArray(prof.activeAgents) ? prof.activeAgents : []
+    })
+    const stored = this.deps.store.getMeshNodeRecord(prof.nodeId)
+    const hubProfile = await this.buildHubProfileSnapshot()
+    const result: MeshRegisterResult = {
+      hubProfile,
+      effectiveRole: 'spoke',
+      ackedWatermark: stored?.ackedWatermark ?? { usageId: 0, toolId: 0, sessionSeq: 0 },
+      peers: this.listPeerSummaries()
+    }
+    this.audit(state.deviceId ?? 'unknown', 'mesh.register', true, `${prof.nodeId}:${transport}`)
+    this.deps.onMeshChanged?.()
+    this.send(ws, { v: 1, type: 'res', id: frame.id, ok: true, payload: result })
+  }
+
+  private handleMeshHeartbeat(ws: WebSocket, state: ConnState, frame: RequestFrame): void {
+    const p = frame.payload as Partial<MeshHeartbeatRequest>
+    const nodeId = typeof p?.nodeId === 'string' && p.nodeId !== 'local' ? p.nodeId : state.meshNodeId
+    if (!nodeId) {
+      this.sendErr(ws, frame.id, 'BAD_REQUEST', '请先调用 mesh.register')
+      return
+    }
+    state.meshNodeId = nodeId
+    const existing = this.deps.store.getMeshNodeRecord(nodeId)
+    if (existing) {
+      this.deps.store.upsertMeshNode({
+        nodeId,
+        hostname: existing.hostname,
+        alias: existing.alias,
+        kind: existing.kind,
+        role: existing.role,
+        transport: state.transport ?? existing.transport,
+        endpoint: state.remoteIp ?? existing.endpoint,
+        rttMs: typeof p.lastRttMs === 'number' && Number.isFinite(p.lastRttMs) ? Math.max(0, Math.round(p.lastRttMs)) : existing.rttMs,
+        lastSeenAt: Date.now(),
+        hwSummary: p.hwSummary ?? existing.hwSummary,
+        activeAgents: Array.isArray(p.activeAgents) ? p.activeAgents : existing.activeAgents
+      })
+    }
+    const result: MeshHeartbeatResult = {
+      serverTs: Date.now(),
+      hubRole: this.deps.identity?.getEffectiveRole() ?? 'hub',
+      peers: this.listPeerSummaries()
+    }
+    this.deps.onMeshChanged?.()
+    this.send(ws, { v: 1, type: 'res', id: frame.id, ok: true, payload: result })
+  }
+
+  private handleMeshIngest(ws: WebSocket, state: ConnState, frame: RequestFrame): void {
+    const batch = frame.payload as Partial<MeshIngestBatch>
+    const nodeId = typeof batch?.nodeId === 'string' && batch.nodeId !== 'local' ? batch.nodeId : state.meshNodeId
+    if (!nodeId || !Array.isArray(batch.usage) || !Array.isArray(batch.sessions) || !Array.isArray(batch.tools) || !batch.watermarkAfter) {
+      this.sendErr(ws, frame.id, 'BAD_REQUEST', 'mesh.ingest 负载格式无效')
+      return
+    }
+    if (state.meshNodeId && state.meshNodeId !== nodeId) {
+      this.sendErr(ws, frame.id, 'UNAUTHORIZED', 'nodeId 与已注册连接不匹配')
+      return
+    }
+    state.meshNodeId = nodeId
+    // 兜底：若节点未经历 register 直接传数据，先建最小档案以免外键/查询缺记录
+    if (!this.deps.store.getMeshNodeRecord(nodeId)) {
+      this.deps.store.upsertMeshNode({
+        nodeId,
+        hostname: nodeId,
+        kind: 'linux',
+        role: 'spoke',
+        transport: state.transport ?? 'lan',
+        endpoint: state.remoteIp,
+        lastSeenAt: Date.now()
+      })
+    }
+    const ack = this.deps.store.ingestRemoteBatch(nodeId, {
+      nodeId,
+      usage: batch.usage,
+      sessions: batch.sessions,
+      tools: batch.tools,
+      watermarkAfter: batch.watermarkAfter
+    })
+    if (ack.acceptedUsage + ack.acceptedSessions + ack.acceptedTools > 0) {
+      this.deps.query.invalidateBoardCache()
+      this.deps.onMeshChanged?.()
+    }
+    this.audit(
+      state.deviceId ?? 'unknown',
+      'mesh.ingest',
+      true,
+      `${nodeId}:u=${ack.acceptedUsage},s=${ack.acceptedSessions},t=${ack.acceptedTools}`
+    )
+    this.send(ws, { v: 1, type: 'res', id: frame.id, ok: true, payload: ack })
   }
 
   /** 测试辅助：等待连接静默（连接数为 0 且最近 5s 无新连接），供冒烟脚本收尾 */
