@@ -5,6 +5,7 @@ import type { ReactNode } from 'react'
 import type { JSX } from 'react'
 import type { AgentStatus, RangeKey } from '@shared/types'
 import { t, useLang } from '../i18n'
+import { BorderBeam } from './MotionEffects'
 import { SlidingTabIndicator } from './SmoothHighlight'
 
 /** 状态文案：渲染期走 t()（语言切换即时生效） */
@@ -31,7 +32,8 @@ export function KpiCard({
   sub,
   indexTag,
   accent,
-  progressPct
+  progressPct,
+  featured
 }: {
   label: string
   value: ReactNode
@@ -39,6 +41,7 @@ export function KpiCard({
   indexTag?: string
   accent?: 'signal' | 'cobalt' | 'success'
   progressPct?: number
+  featured?: boolean
 }): JSX.Element {
   const accentColor =
     accent === 'signal'
@@ -49,7 +52,8 @@ export function KpiCard({
           ? 'var(--nx-success)'
           : undefined
   return (
-    <div className="nx-card-elevated nx-kpi-card relative flex flex-col gap-2 overflow-hidden rounded-xl border border-border bg-card px-4 py-3">
+    <div className="nx-card-elevated nx-kpi-card nx-spotlight-card relative flex flex-col gap-2 overflow-hidden rounded-xl border border-border bg-card px-4 py-3">
+      <BorderBeam active={Boolean(featured)} durationSec={5.6} />
       <div className="flex items-center justify-between gap-2">
         <div className="text-ui-xs font-medium text-foreground-subtle">{label}</div>
         {(indexTag || accentColor) && (
@@ -96,7 +100,7 @@ export function ChartCard({
 }): JSX.Element {
   return (
     <section
-      className={`nx-card-elevated flex flex-col gap-3 rounded-xl bg-surface p-4 ${className ?? ''}`}
+      className={`nx-card-elevated nx-spotlight-chart flex flex-col gap-3 rounded-xl bg-surface p-4 ${className ?? ''}`}
     >
       <header className="flex items-center justify-between gap-2">
         <h2 className="text-ui-base font-medium text-foreground">{title}</h2>

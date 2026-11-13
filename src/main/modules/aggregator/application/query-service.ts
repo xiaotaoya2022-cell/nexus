@@ -3,22 +3,28 @@
 // today 的起点取 JS 本地零点，两者一致。
 
 import os from 'node:os'
-import type {
-  BoardData,
-  CalendarDay,
-  HeatmapData,
-  NamedStat,
-  Overview,
-  RangeKey,
-  SessionRow,
-  TokenTotals,
-  ToolStat,
-  TrendPoint,
-  TokenTypeStat
+import {
+  DEFAULT_PRICING_CONFIG,
+  type BoardData,
+  type CalendarDay,
+  type HeatmapData,
+  type NamedStat,
+  type Overview,
+  type PricingConfig,
+  type ProjectStat,
+  type RangeKey,
+  type SessionDetail,
+  type SessionModelStat,
+  type SessionRow,
+  type SessionToolStat,
+  type TokenTotals,
+  type ToolStat,
+  type TrendPoint,
+  type TokenTypeStat
 } from '@shared/types'
 import type { NexusStore } from '../infrastructure/store'
 import { TOTAL_EXPR } from '../infrastructure/store'
-import { estimateCostUsd } from './pricing'
+import { estimateCostUsd, normalizePricingConfig } from './pricing'
 
 const SUMS = `SUM(input_tokens) i, SUM(output_tokens) o, SUM(reasoning_tokens) r,
   SUM(cache_read_tokens) cr, SUM(cache_write_tokens) cw, COALESCE(SUM(requests), COUNT(*)) n`
@@ -88,6 +94,16 @@ export class QueryService {
     if (!nodeId || nodeId === 'all') return null
     const localId = this.getLocalNodeId()
     return nodeId === 'local' || nodeId === localId ? 'local' : nodeId
+  }
+
+  getPricingConfig(): { config: PricingConfig; sig: string } {
+    const raw = this.store.getSetting('pricingConfig')
+    if (!raw) return { config: DEFAULT_PRICING_CONFIG, sig: 'default' }
+    try {
+      return { config: normalizePricingConfig(JSON.parse(raw)), sig: raw }
+    } catch {
+      return { config: DEFAULT_PRICING_CONFIG, sig: 'default' }
+    }
   }
 
   private buildNodeLabels(): Map<string, string> {
@@ -166,19 +182,24 @@ export class QueryService {
       .prepare(`SELECT COUNT(DISTINCT model) c FROM usage_records ${w.sql}`)
       .get(...w.params) as { c: number } | undefined
 
-    // 成本按模型逐项估算（定价因模型而异）
+    // 成本按模型逐项估算（定价因模型而异，支持自定义规则）
+    const { config: pricingConfig } = this.getPricingConfig()
     const modelRows = this.store.db
       .prepare(`SELECT model, ${SUMS} FROM usage_records ${w.sql} GROUP BY model`)
       .all(...w.params) as Array<Record<string, unknown>>
     let cost = 0
     for (const m of modelRows) {
-      cost += estimateCostUsd(String(m.model), {
-        input: Number(m.i) || 0,
-        output: Number(m.o) || 0,
-        reasoning: Number(m.r) || 0,
-        cacheRead: Number(m.cr) || 0,
-        cacheWrite: Number(m.cw) || 0
-      })
+      cost += estimateCostUsd(
+        String(m.model),
+        {
+          input: Number(m.i) || 0,
+          output: Number(m.o) || 0,
+          reasoning: Number(m.r) || 0,
+          cacheRead: Number(m.cr) || 0,
+          cacheWrite: Number(m.cw) || 0
+        },
+        pricingConfig
+      )
     }
 
     const totals: TokenTotals = {
@@ -444,8 +465,129 @@ export class QueryService {
     })
   }
 
-  /** 看板结果缓存：agent=null 的主路径按 range 缓存，sync 有新数据时失效。
-   *  同范围二次切换 = 内存直读（0ms），配合 sync 后空闲预热，切范围基本瞬时。 */
+  getSessionDetail(
+    agent: string,
+    sessionId: string,
+    nodeId: string | null = null
+  ): SessionDetail | null {
+    const nodeFilter = this.resolveNodeFilter(nodeId)
+    const localId = this.getLocalNodeId()
+    const labels = this.buildNodeLabels()
+    const { config: pricingConfig } = this.getPricingConfig()
+
+    const sessSql = `SELECT source_node_id, agent, session_id, title, project_dir, model, started_at, updated_at
+       FROM sessions WHERE agent = ? AND session_id = ? ${nodeFilter ? 'AND source_node_id = ?' : ''}
+       ORDER BY COALESCE(updated_at, started_at, 0) DESC LIMIT 1`
+    const sessParams: Array<string | number> = nodeFilter ? [agent, sessionId, nodeFilter] : [agent, sessionId]
+    const sessRow = this.store.db.prepare(sessSql).get(...sessParams) as Record<string, unknown> | undefined
+
+    let src = sessRow ? String(sessRow.source_node_id ?? 'local') : nodeFilter
+    if (!src) {
+      const anyUsage = this.store.db
+        .prepare('SELECT source_node_id FROM usage_records WHERE agent = ? AND session_id = ? LIMIT 1')
+        .get(agent, sessionId) as { source_node_id?: string } | undefined
+      if (!anyUsage) return null
+      src = String(anyUsage.source_node_id ?? 'local')
+    }
+
+    const usageRows = this.store.db
+      .prepare(
+        `SELECT model, ${SUMS}, MIN(ts) min_ts, MAX(ts) max_ts
+         FROM usage_records
+         WHERE source_node_id = ? AND agent = ? AND session_id = ?
+         GROUP BY model`
+      )
+      .all(src, agent, sessionId) as Array<Record<string, unknown>>
+
+    const models: SessionModelStat[] = []
+    let sumI = 0, sumO = 0, sumR = 0, sumCr = 0, sumCw = 0, sumN = 0, totalCost = 0
+    let minTs: number | null = null
+    let maxTs: number | null = null
+
+    for (const r of usageRows) {
+      const modelName = String(r.model ?? 'unknown')
+      const i = Number(r.i) || 0
+      const o = Number(r.o) || 0
+      const rr = Number(r.r) || 0
+      const cr = Number(r.cr) || 0
+      const cw = Number(r.cw) || 0
+      const n = Number(r.n) || 0
+      const tot = i + o + rr + cr + cw
+      const cost = estimateCostUsd(
+        modelName,
+        { input: i, output: o, reasoning: rr, cacheRead: cr, cacheWrite: cw },
+        pricingConfig
+      )
+      sumI += i; sumO += o; sumR += rr; sumCr += cr; sumCw += cw; sumN += n; totalCost += cost
+      const rMin = r.min_ts == null ? null : Number(r.min_ts)
+      const rMax = r.max_ts == null ? null : Number(r.max_ts)
+      if (rMin != null && (minTs == null || rMin < minTs)) minTs = rMin
+      if (rMax != null && (maxTs == null || rMax > maxTs)) maxTs = rMax
+      models.push({
+        model: modelName,
+        requests: n,
+        input: i,
+        output: o,
+        reasoning: rr,
+        cacheRead: cr,
+        cacheWrite: cw,
+        total: tot,
+        estimatedCostUsd: cost
+      })
+    }
+    models.sort((a, b) => b.total - a.total)
+
+    const toolRows = this.store.db
+      .prepare(
+        `SELECT tool_name t, COUNT(*) c
+         FROM tool_calls
+         WHERE source_node_id = ? AND agent = ? AND session_id = ?
+         GROUP BY tool_name ORDER BY c DESC`
+      )
+      .all(src, agent, sessionId) as Array<Record<string, unknown>>
+    const tools: SessionToolStat[] = toolRows.map((r) => ({
+      tool: String(r.t),
+      count: Number(r.c) || 0
+    }))
+
+    const startedAt =
+      sessRow?.started_at != null ? Number(sessRow.started_at) : minTs
+    const updatedAt =
+      sessRow?.updated_at != null ? Number(sessRow.updated_at) : maxTs
+    const totalTokens = sumI + sumO + sumR + sumCr + sumCw
+    const cacheDenom = sumI + sumCr + sumCw
+
+    return {
+      session: {
+        agent,
+        sessionId,
+        title: sessRow?.title == null ? null : String(sessRow.title),
+        projectDir: sessRow?.project_dir == null ? null : String(sessRow.project_dir),
+        model: sessRow?.model == null ? (models[0]?.model ?? null) : String(sessRow.model),
+        startedAt,
+        updatedAt,
+        tokens: totalTokens,
+        requests: sumN,
+        sourceNodeId: src === 'local' ? localId : src,
+        sourceNodeLabel: labels.get(src) ?? (src === 'local' ? '本机' : src)
+      },
+      totals: {
+        requests: sumN,
+        input: sumI,
+        output: sumO,
+        reasoning: sumR,
+        cacheRead: sumCr,
+        cacheWrite: sumCw,
+        total: totalTokens,
+        estimatedCostUsd: totalCost
+      },
+      cacheHitRate: cacheDenom > 0 ? (sumCr / cacheDenom) * 100 : null,
+      models,
+      tools
+    }
+  }
+
+  /** 看板结果缓存：agent=null 且无自定义范围/项目过滤时按 range 缓存，sync 或定价修改时失效。 */
   private boardCache = new Map<string, BoardData>()
 
   invalidateBoardCache(): void {
@@ -453,14 +595,14 @@ export class QueryService {
   }
 
   /** 看板全量聚合：单遍扫描 usage_records，同时产出 overview/趋势(双分组)/byAgent/
-   *  byModel/breakdown/heatmap/sessions。代替 9 次独立全表查询（实测 1.65s→~0.4s）。
-   *  tool_calls 与 sessions 表为独立小表，各自单查。 */
+   *  byModel/byProject/breakdown/heatmap/sessions。 */
   getBoard(
     range: RangeKey,
     agent: string | null,
     now = Date.now(),
     custom?: { start: number; end: number },
-    nodeId: string | null = null
+    nodeId: string | null = null,
+    projectDir: string | null = null
   ): BoardData {
     // 自定义时间段：since/until 直接给定（不缓存——范围组合无界）
     const since = custom ? custom.start : rangeStartMs(range, now)
@@ -472,17 +614,53 @@ export class QueryService {
       until = d.getTime()
     }
     const nodeFilter = this.resolveNodeFilter(nodeId)
+    const projFilter = typeof projectDir === 'string' && projectDir.trim() ? projectDir.trim() : null
     const localId = this.getLocalNodeId()
     const nodeLabels = this.buildNodeLabels()
+    const { config: pricingConfig, sig: pricingSig } = this.getPricingConfig()
     const cacheKey = custom
-      ? `custom:${since}:${until}:${agent ?? 'all'}:${nodeFilter ?? 'all'}`
-      : `${range}:${agent ?? 'all'}:${nodeFilter ?? 'all'}`
-    if (agent === null && !custom) {
+      ? `custom:${since}:${until}:${agent ?? 'all'}:${nodeFilter ?? 'all'}:${projFilter ?? 'all'}:${pricingSig}`
+      : `${range}:${agent ?? 'all'}:${nodeFilter ?? 'all'}:${projFilter ?? 'all'}:${pricingSig}`
+    if (agent === null && !custom && !projFilter) {
       const hit = this.boardCache.get(cacheKey)
       if (hit) return hit
     }
     const whereAgent = agent ? 'AND agent = ?' : ''
     const whereNode = nodeFilter ? 'AND source_node_id = ?' : ''
+
+    // 先读 sessions 小表以建立 session -> project_dir 映射（供全量项目归因与工作区下钻过滤）
+    const sessConds: string[] = []
+    const sessParams: Array<string | number> = []
+    if (agent) {
+      sessConds.push('agent = ?')
+      sessParams.push(agent)
+    }
+    if (nodeFilter) {
+      sessConds.push('source_node_id = ?')
+      sessParams.push(nodeFilter)
+    }
+    const sessWhere = sessConds.length > 0 ? `WHERE ${sessConds.join(' AND ')}` : ''
+    const sessionRows = this.store.db
+      .prepare(
+        `SELECT source_node_id, agent, session_id, title, project_dir, model, started_at, updated_at
+         FROM sessions ${sessWhere}`
+      )
+      .all(...sessParams) as Array<Record<string, unknown>>
+
+    const sessionProjectMap = new Map<string, string | null>()
+    for (const r of sessionRows) {
+      const src = String(r.source_node_id ?? 'local')
+      const key = `${src}\u0000${String(r.agent)}\u0000${String(r.session_id)}`
+      const dir = r.project_dir != null && String(r.project_dir).trim() ? String(r.project_dir).trim() : null
+      sessionProjectMap.set(key, dir)
+    }
+
+    const matchesProject = (dir: string | null): boolean => {
+      if (!projFilter) return true
+      if (projFilter === '__unassigned__') return dir === null
+      return dir === projFilter
+    }
+
     const params: Array<string | number> = [since, until]
     if (agent) params.push(agent)
     if (nodeFilter) params.push(nodeFilter)
@@ -500,6 +678,19 @@ export class QueryService {
     const sum = { i: 0, o: 0, r: 0, cr: 0, cw: 0, n: 0 }
     const perModel = new Map<string, { i: number; o: number; r: number; cr: number; cw: number; n: number }>()
     const perAgent = new Map<string, { i: number; o: number; r: number; cr: number; cw: number; n: number }>()
+    const perProject = new Map<
+      string,
+      {
+        projectDir: string | null
+        i: number
+        o: number
+        r: number
+        cr: number
+        cw: number
+        n: number
+        models: Map<string, { i: number; o: number; r: number; cr: number; cw: number }>
+      }
+    >()
     const trendM = new Map<string, Map<string, number>>() // bucket×model → tokens
     const trendA = new Map<string, Map<string, number>>() // bucket×agent → tokens
     const bucketsM = new Map<string, { total: number; i: number; o: number; r: number; cr: number; cw: number; n: number }>()
@@ -509,13 +700,19 @@ export class QueryService {
     const isToday = range === 'today'
 
     for (const r of rows) {
+      const srcNode = String(r.source_node_id ?? 'local')
+      const agentId = String(r.agent)
+      const sid = r.session_id
+      const skey = sid != null && sid !== '' ? `${srcNode}\u0000${agentId}\u0000${String(sid)}` : null
+      const rowProj = skey ? (sessionProjectMap.get(skey) ?? null) : null
+      if (!matchesProject(rowProj)) continue
+
       const i = Number(r.i) || 0
       const o = Number(r.o) || 0
       const rr = Number(r.r) || 0
       const cr = Number(r.cr) || 0
       const cw = Number(r.cw) || 0
       const n = Number(r.n) || 1
-      const agentId = String(r.agent)
       const model = String(r.model ?? 'unknown')
       const tot = i + o + rr + cr + cw
 
@@ -528,6 +725,17 @@ export class QueryService {
       let pa = perAgent.get(agentId)
       if (!pa) { pa = { i: 0, o: 0, r: 0, cr: 0, cw: 0, n: 0 }; perAgent.set(agentId, pa) }
       pa.i += i; pa.o += o; pa.r += rr; pa.cr += cr; pa.cw += cw; pa.n += n
+
+      const projKey = rowProj ?? '__unassigned__'
+      let pp = perProject.get(projKey)
+      if (!pp) {
+        pp = { projectDir: rowProj, i: 0, o: 0, r: 0, cr: 0, cw: 0, n: 0, models: new Map() }
+        perProject.set(projKey, pp)
+      }
+      pp.i += i; pp.o += o; pp.r += rr; pp.cr += cr; pp.cw += cw; pp.n += n
+      let ppm = pp.models.get(model)
+      if (!ppm) { ppm = { i: 0, o: 0, r: 0, cr: 0, cw: 0 }; pp.models.set(model, ppm) }
+      ppm.i += i; ppm.o += o; ppm.r += rr; ppm.cr += cr; ppm.cw += cw
 
       // 桶：今日=小时，其余=日期（JS 本地时区，与 strftime localtime 口径一致）
       const d = new Date(Number(r.ts))
@@ -548,10 +756,7 @@ export class QueryService {
       const hkey = `${d.getHours()},${(d.getDay() + 6) % 7}`
       heat.set(hkey, (heat.get(hkey) ?? 0) + tot)
 
-      const sid = r.session_id
-      if (sid != null && sid !== '') {
-        const srcNode = String(r.source_node_id ?? 'local')
-        const skey = `${srcNode}\u0000${agentId}\u0000${String(sid)}`
+      if (skey) {
         sessionsSet.add(skey)
         let su = sessionUsage.get(skey)
         if (!su) { su = { agent: agentId, sessionId: String(sid), tokens: 0, requests: 0 }; sessionUsage.set(skey, su) }
@@ -607,36 +812,70 @@ export class QueryService {
         }))
         .sort((a, b) => b.tokens - a.tokens)
 
+    // 跨 Agent 全局工作区归因排行（同名目录冲突时自动补父目录消歧）
+    const baseNameCounts = new Map<string, number>()
+    for (const p of perProject.values()) {
+      if (!p.projectDir) continue
+      const parts = p.projectDir.split(/[\\/]/).filter(Boolean)
+      const base = parts.length ? parts[parts.length - 1] : p.projectDir
+      baseNameCounts.set(base, (baseNameCounts.get(base) ?? 0) + 1)
+    }
+    const byProject: ProjectStat[] = [...perProject.values()]
+      .map((p) => {
+        let projCost = 0
+        for (const [m, mv] of p.models) {
+          projCost += estimateCostUsd(m, { input: mv.i, output: mv.o, reasoning: mv.r, cacheRead: mv.cr, cacheWrite: mv.cw }, pricingConfig)
+        }
+        let label = '__unassigned__'
+        if (p.projectDir) {
+          const parts = p.projectDir.split(/[\\/]/).filter(Boolean)
+          const base = parts.length ? parts[parts.length - 1] : p.projectDir
+          label =
+            (baseNameCounts.get(base) ?? 0) > 1 && parts.length > 1
+              ? `${parts[parts.length - 2]}/${base}`
+              : base
+        }
+        return {
+          name: label,
+          projectDir: p.projectDir,
+          tokens: p.i + p.o + p.r + p.cr + p.cw,
+          requests: p.n,
+          input: p.i,
+          output: p.o,
+          cacheRead: p.cr,
+          cacheWrite: p.cw,
+          estimatedCostUsd: projCost
+        }
+      })
+      .filter((p) => p.tokens > 0)
+      .sort((a, b) => b.tokens - a.tokens)
+
     let cost = 0
     for (const [model, v] of perModel) {
-      cost += estimateCostUsd(model, { input: v.i, output: v.o, reasoning: v.r, cacheRead: v.cr, cacheWrite: v.cw })
+      cost += estimateCostUsd(
+        model,
+        { input: v.i, output: v.o, reasoning: v.r, cacheRead: v.cr, cacheWrite: v.cw },
+        pricingConfig
+      )
     }
 
-    // sessions 表 join（会话元数据小表单查）
-    const sessConds: string[] = []
-    const sessParams: Array<string | number> = []
-    if (agent) {
-      sessConds.push('agent = ?')
-      sessParams.push(agent)
-    }
-    if (nodeFilter) {
-      sessConds.push('source_node_id = ?')
-      sessParams.push(nodeFilter)
-    }
-    const sessWhere = sessConds.length > 0 ? `WHERE ${sessConds.join(' AND ')}` : ''
-    const sessionRows = this.store.db
-      .prepare(
-        `SELECT source_node_id, agent, session_id, title, project_dir, model, started_at, updated_at
-         FROM sessions ${sessWhere}`
-      )
-      .all(...sessParams) as Array<Record<string, unknown>>
-    for (const r of sessionRows) {
+    const filteredSessionsRows = projFilter
+      ? sessionRows.filter((r) => {
+          const dir =
+            r.project_dir != null && String(r.project_dir).trim()
+              ? String(r.project_dir).trim()
+              : null
+          return matchesProject(dir)
+        })
+      : sessionRows
+
+    for (const r of filteredSessionsRows) {
       const actTs = Number(r.updated_at ?? r.started_at ?? 0)
       if (actTs >= since && actTs <= until) {
         sessionsSet.add(`${String(r.source_node_id ?? 'local')}\u0000${String(r.agent)}\u0000${String(r.session_id)}`)
       }
     }
-    const sessions: SessionRow[] = sessionRows
+    const sessions: SessionRow[] = filteredSessionsRows
       .map((r) => {
         const src = String(r.source_node_id ?? 'local')
         const su = sessionUsage.get(`${src}\u0000${String(r.agent)}\u0000${String(r.session_id)}`)
@@ -668,18 +907,55 @@ export class QueryService {
     const toolParams: Array<string | number> = [since, until]
     if (agent) toolParams.push(agent)
     if (nodeFilter) toolParams.push(nodeFilter)
-    const toolRows = this.store.db
-      .prepare(
-        `SELECT tool_name t, COUNT(*) c FROM tool_calls
-         WHERE ts >= ? AND ts <= ? ${agent ? 'AND agent = ?' : ''} ${whereNode} GROUP BY tool_name ORDER BY c DESC LIMIT 12`
+    let tools: ToolStat[] = []
+    let toolCallCount = 0
+    if (projFilter) {
+      const rawTools = this.store.db
+        .prepare(
+          `SELECT source_node_id, agent, session_id, tool_name t
+           FROM tool_calls WHERE ts >= ? AND ts <= ? ${whereAgent} ${whereNode}`
+        )
+        .all(...toolParams) as Array<Record<string, unknown>>
+      const toolMap = new Map<string, number>()
+      for (const r of rawTools) {
+        const sid = r.session_id
+        const tkey =
+          sid != null && sid !== ''
+            ? `${String(r.source_node_id ?? 'local')}\u0000${String(r.agent)}\u0000${String(sid)}`
+            : null
+        const tProj = tkey ? (sessionProjectMap.get(tkey) ?? null) : null
+        if (!matchesProject(tProj)) continue
+        toolCallCount += 1
+        const name = String(r.t)
+        toolMap.set(name, (toolMap.get(name) ?? 0) + 1)
+      }
+      tools = [...toolMap.entries()]
+        .map(([tool, count]) => ({ tool, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 12)
+    } else {
+      const toolRows = this.store.db
+        .prepare(
+          `SELECT tool_name t, COUNT(*) c FROM tool_calls
+           WHERE ts >= ? AND ts <= ? ${agent ? 'AND agent = ?' : ''} ${whereNode} GROUP BY tool_name ORDER BY c DESC LIMIT 12`
+        )
+        .all(...toolParams) as Array<Record<string, unknown>>
+      tools = toolRows.map((r) => ({ tool: String(r.t), count: Number(r.c) || 0 }))
+      toolCallCount = Number(
+        (this.store.db
+          .prepare(
+            `SELECT COUNT(*) c FROM tool_calls WHERE ts >= ? AND ts <= ? ${agent ? 'AND agent = ?' : ''} ${whereNode}`
+          )
+          .get(...toolParams) as { c: number } | undefined)?.c ?? 0
       )
-      .all(...toolParams) as Array<Record<string, unknown>>
+    }
 
     const board: BoardData = {
       overview: {
         range,
         agent,
         nodeId,
+        projectDir: projFilter,
         totals: {
           requests: sum.n,
           input: sum.i, output: sum.o, reasoning: sum.r,
@@ -688,19 +964,14 @@ export class QueryService {
           estimatedCostUsd: cost
         },
         sessionCount: sessionsSet.size,
-        toolCallCount: Number(
-          (this.store.db
-            .prepare(
-              `SELECT COUNT(*) c FROM tool_calls WHERE ts >= ? AND ts <= ? ${agent ? 'AND agent = ?' : ''} ${whereNode}`
-            )
-            .get(...toolParams) as { c: number } | undefined)?.c ?? 0
-        ),
+        toolCallCount,
         activeModels: perModel.size
       },
       trendByModel: buildTrend(trendM),
       trendByAgent: buildTrend(trendA),
       byAgent: named(perAgent),
       byModel: named(perModel),
+      byProject,
       breakdown: [
         { key: 'input', label: '输入', tokens: sum.i },
         { key: 'output', label: '输出', tokens: sum.o },
@@ -709,10 +980,10 @@ export class QueryService {
         { key: 'cacheWrite', label: '缓存写入', tokens: sum.cw }
       ],
       heatmap: { cells, max: heatMax },
-      tools: toolRows.map((r) => ({ tool: String(r.t), count: Number(r.c) || 0 })),
+      tools,
       sessions
     }
-    if (agent === null && !custom) this.boardCache.set(cacheKey, board)
+    if (agent === null && !custom && !projFilter) this.boardCache.set(cacheKey, board)
     return board
   }
 }

@@ -8,6 +8,7 @@ import type {
   HeatmapData,
   NamedStat,
   Overview,
+  ProjectStat,
   SessionRow,
   TokenTypeStat,
   ToolStat,
@@ -21,6 +22,7 @@ export interface DashboardData {
   trend: TrendPoint[]
   byAgent: NamedStat[]
   byModel: NamedStat[]
+  byProject: ProjectStat[]
   breakdown: TokenTypeStat[]
   heatmap: HeatmapData
   tools: ToolStat[]
@@ -38,7 +40,9 @@ export function useDashboard(): {
   const range = useUi((s) => s.range)
   const agent = useUi((s) => s.agent)
   const selectedNodeId = useUi((s) => s.selectedNodeId)
+  const selectedProjectDir = useUi((s) => s.selectedProjectDir)
   const customRange = useUi((s) => s.customRange)
+  const pricingRevision = useUi((s) => s.pricingRevision)
   const [data, setData] = useState<DashboardData | null>(null)
   const [agents, setAgents] = useState<AgentInfo[]>([])
   const [loading, setLoading] = useState(false)
@@ -55,8 +59,21 @@ export function useDashboard(): {
     try {
       const custom = range === 'custom' && customRange ? customRange : undefined
       const [board, agentInfos] = await Promise.all([
-        nexus.getBoard(range, agent, custom?.start, custom?.end, selectedNodeId),
-        nexus.getAgents(range, custom?.start, custom?.end, selectedNodeId)
+        nexus.getBoard(
+          range,
+          agent,
+          custom?.start,
+          custom?.end,
+          selectedNodeId,
+          selectedProjectDir
+        ),
+        nexus.getAgents(
+          range,
+          custom?.start,
+          custom?.end,
+          selectedNodeId,
+          selectedProjectDir
+        )
       ])
       if (seq !== reloadSeq.current) return // 过期响应丢弃（竞态守卫）
       trendRef.current = board
@@ -65,6 +82,7 @@ export function useDashboard(): {
         trend: trendGroup === 'model' ? board.trendByModel : board.trendByAgent,
         byAgent: board.byAgent,
         byModel: board.byModel,
+        byProject: board.byProject,
         breakdown: board.breakdown,
         heatmap: board.heatmap,
         tools: board.tools,
@@ -74,7 +92,7 @@ export function useDashboard(): {
     } finally {
       if (seq === reloadSeq.current) setLoading(false)
     }
-  }, [range, agent, selectedNodeId, trendGroup, customRange])
+  }, [range, agent, selectedNodeId, selectedProjectDir, trendGroup, customRange, pricingRevision])
 
   // 切换趋势分组：数据已在手，仅重选 series，零查询
   useEffect(() => {

@@ -1,10 +1,11 @@
 // 算力组网 Mesh 一级视图（Nexus Mesh Phase 3）：
 // 涵盖动态硬件拓扑画布、全网节点硬件刀片卡、以及 Hub 配对凭据生成 / Spoke 粘入入网双向面板。
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import { parsePairUri, type PairingInfo, type RemoteStatusInfo } from '@shared/protocol'
 import type {
+  AgentInfo,
   MeshStatusInfo,
   NodeRole,
   SessionRow
@@ -22,24 +23,34 @@ import {
   osSummary,
   transportLabel
 } from './NodeVisuals'
+import {
+  BorderBeam,
+  NexusTelemetryMarquee,
+  ScrollReveal,
+  SpotlightGroup
+} from './MotionEffects'
 import { SlidingTabIndicator } from './SmoothHighlight'
 
 export interface MeshViewProps {
   meshStatus: MeshStatusInfo | null
   actions: MeshActions
+  agents: AgentInfo[]
   sessions: SessionRow[]
   agentLabels: Map<string, string>
   onInspectNode: (nodeId: string | null) => void
   onToast: (message: string) => void
+  quickPairNonce?: number
 }
 
 export function MeshView({
   meshStatus,
   actions,
+  agents,
   sessions,
   agentLabels,
   onInspectNode,
-  onToast
+  onToast,
+  quickPairNonce = 0
 }: MeshViewProps): JSX.Element {
   useLang()
   const [syncing, setSyncing] = useState(false)
@@ -56,6 +67,85 @@ export function MeshView({
   const [pairUriInput, setPairUriInput] = useState('')
   const [pairBusy, setPairBusy] = useState(false)
   const [pairError, setPairError] = useState<string | null>(null)
+  const [peerPulseMap, setPeerPulseMap] = useState<Record<string, number>>({})
+  const prevPeerSigRef = useRef<
+    Map<string, { online: boolean; totalTokens: number; recordCount: number; wmKey: string }> | null
+  >(null)
+  const pulseTimersRef = useRef<Map<string, number>>(new Map())
+  const pairingPanelRef = useRef<HTMLDivElement>(null)
+  const lastQuickPairNonceRef = useRef(0)
+
+  useEffect(() => {
+    const timers = pulseTimersRef.current
+    return () => {
+      for (const timer of timers.values()) window.clearTimeout(timer)
+      timers.clear()
+    }
+  }, [])
+
+  // 当远程 Peer 首次线上连入或产生增量 token / record / 水位跃迁时，沿连线发射 Animated Beam 脉冲粒子
+  useEffect(() => {
+    if (!meshStatus) return
+    const { localNode: ln, nodes: ns } = meshStatus
+    const hub =
+      ns.find((n) => n.role === 'hub' && n.status === 'online') ??
+      ns.find((n) => n.role === 'hub') ??
+      ln
+    const peers = ns.filter((n) => n.nodeId !== hub.nodeId)
+
+    const nextSig = new Map<
+      string,
+      { online: boolean; totalTokens: number; recordCount: number; wmKey: string }
+    >()
+    const pulsed: string[] = []
+    const prevMap = prevPeerSigRef.current
+
+    for (const p of peers) {
+      const wm = p.ackedWatermark
+      const sig = {
+        online: p.status === 'online',
+        totalTokens: p.totalTokens,
+        recordCount: p.recordCount,
+        wmKey: `${wm.usageId}:${wm.toolId}:${wm.sessionSeq}`
+      }
+      nextSig.set(p.nodeId, sig)
+      if (prevMap) {
+        const prev = prevMap.get(p.nodeId)
+        if (
+          (!prev && sig.online) ||
+          (prev &&
+            ((!prev.online && sig.online) ||
+              sig.totalTokens > prev.totalTokens ||
+              sig.recordCount > prev.recordCount ||
+              (sig.online && sig.wmKey !== prev.wmKey)))
+        ) {
+          pulsed.push(p.nodeId)
+        }
+      }
+    }
+    prevPeerSigRef.current = nextSig
+    if (pulsed.length === 0) return
+
+    setPeerPulseMap((curr) => {
+      const next = { ...curr }
+      for (const id of pulsed) next[id] = (next[id] ?? 0) + 1
+      return next
+    })
+
+    for (const id of pulsed) {
+      const prevTimer = pulseTimersRef.current.get(id)
+      if (prevTimer !== undefined) window.clearTimeout(prevTimer)
+      const timer = window.setTimeout(() => {
+        pulseTimersRef.current.delete(id)
+        setPeerPulseMap((curr) => {
+          if (!(id in curr)) return curr
+          const { [id]: _, ...rest } = curr
+          return rest
+        })
+      }, 1600)
+      pulseTimersRef.current.set(id, timer)
+    }
+  }, [meshStatus])
 
   useEffect(() => {
     void nexus.getRemoteStatus().then(setRemoteStatus).catch(() => undefined)
@@ -180,6 +270,13 @@ export function MeshView({
     }
   }
 
+  useEffect(() => {
+    if (quickPairNonce <= lastQuickPairNonceRef.current) return
+    lastQuickPairNonceRef.current = quickPairNonce
+    pairingPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    void handleGeneratePairing()
+  })
+
   const handlePairWithHub = async (): Promise<void> => {
     const raw = pairUriInput.trim()
     if (!raw || pairBusy) return
@@ -210,9 +307,12 @@ export function MeshView({
   }
 
   return (
-    <main className="nx-shell-bg min-w-0 flex-1 space-y-4 overflow-y-auto rounded-xl border border-hairline bg-panel p-4 md:p-5">
+    <SpotlightGroup
+      as="main"
+      className="nx-shell-bg min-w-0 flex-1 space-y-4 overflow-y-auto rounded-xl border border-hairline bg-panel p-4 md:p-5"
+    >
       {/* 顶部标题与角色控制栏 */}
-      <section className="nx-card-elevated flex flex-wrap items-center justify-between gap-4 rounded-xl bg-card px-5 py-4">
+      <section className="nx-card-elevated nx-spotlight-card flex flex-wrap items-center justify-between gap-4 rounded-xl bg-card px-5 py-4">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             <MeshGlyph className="size-5 text-signal" />
@@ -263,7 +363,7 @@ export function MeshView({
       </section>
 
       {/* 动态硬件拓扑画布 */}
-      <section className="nx-card-elevated relative overflow-hidden rounded-xl bg-card p-5">
+      <section className="nx-card-elevated nx-spotlight-card relative overflow-hidden rounded-xl bg-card p-5">
         <header className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="text-ui-base font-medium text-foreground">{t('mesh.topology.title')}</h2>
@@ -279,17 +379,24 @@ export function MeshView({
         </header>
 
         <div className="grid grid-cols-1 items-center gap-4 lg:grid-cols-12">
-          {/* Hub 核心节点 */}
+          {/* Hub 核心节点：当存在在线 Peer 连入时以 BorderBeam 指示实时汇流状态 */}
           <div className="lg:col-span-4">
             <button
               type="button"
+              data-no-press=""
               onClick={() => onInspectNode(hubNode.nodeId)}
-              className="group w-full cursor-pointer rounded-xl border border-signal/35 bg-surface p-4 text-left transition-colors duration-150 hover:border-signal"
+              className="nx-spotlight-card group relative w-full cursor-pointer overflow-hidden rounded-xl border border-signal/35 bg-surface p-4 text-left transition-colors duration-150 hover:border-signal"
             >
+              <BorderBeam
+                active={peerNodes.some((p) => p.status === 'online')}
+                durationSec={5.2}
+                fromColor="var(--nx-cobalt)"
+                toColor="var(--nx-signal)"
+              />
               <div className="flex items-center justify-between gap-2">
                 <span className="inline-flex items-center gap-1.5 font-mono text-[10px] font-semibold text-signal">
                   <span className="nx-breathe h-2 w-2 rounded-full bg-signal" />
-                  HUB · {nodeKindLabel(hubNode.kind)}
+                  {hubNode.role.toUpperCase()} · {nodeKindLabel(hubNode.kind)}
                 </span>
                 {hubNode.isLocal && (
                   <span className="rounded bg-raised px-1.5 py-0.5 text-[10px] text-foreground-subtle">
@@ -334,6 +441,8 @@ export function MeshView({
                     const yEnd = arr.length === 1 ? 50 : 16 + (idx / (arr.length - 1)) * 68
                     const online = peer.status === 'online'
                     const stroke = online ? 'var(--nx-cobalt)' : 'var(--nx-border)'
+                    const pulseSeq = peerPulseMap[peer.nodeId] ?? 0
+                    const inboundPath = `M 212 ${yEnd} C 130 ${yEnd}, 90 50, 8 50`
                     return (
                       <g key={peer.nodeId}>
                         <path
@@ -356,11 +465,46 @@ export function MeshView({
                         </path>
                         <circle cx="8" cy="50" r="3" fill="var(--nx-signal)" />
                         <circle cx="212" cy={yEnd} r="3" fill={stroke} />
+                        {pulseSeq > 0 && (
+                          <g
+                            key={`${peer.nodeId}-pulse-${pulseSeq}`}
+                            className="nx-mesh-pulse"
+                            data-pulse-node={peer.nodeId}
+                          >
+                            <circle r="5.5" fill="var(--nx-signal)" opacity="0.28">
+                              <animateMotion dur="0.95s" repeatCount="1" fill="freeze" path={inboundPath} />
+                              <animate
+                                attributeName="opacity"
+                                values="0.34;0.34;0"
+                                keyTimes="0;0.78;1"
+                                dur="0.95s"
+                                fill="freeze"
+                              />
+                            </circle>
+                            <circle r="2.8" fill="var(--nx-signal)">
+                              <animateMotion dur="0.95s" repeatCount="1" fill="freeze" path={inboundPath} />
+                              <animate
+                                attributeName="opacity"
+                                values="1;1;0"
+                                keyTimes="0;0.78;1"
+                                dur="0.95s"
+                                fill="freeze"
+                              />
+                            </circle>
+                          </g>
+                        )}
                       </g>
                     )
                   })}
                 </svg>
-                <span className="rounded-full bg-surface px-2.5 py-0.5 font-mono text-[10px] text-foreground-subtle">
+                <span
+                  data-mesh-pulse={Object.keys(peerPulseMap).length > 0 ? 'true' : undefined}
+                  className={`rounded-full px-2.5 py-0.5 font-mono text-[10px] transition-colors duration-200 ${
+                    Object.keys(peerPulseMap).length > 0
+                      ? 'border border-signal/55 bg-signal-soft text-signal'
+                      : 'bg-surface text-foreground-subtle'
+                  }`}
+                >
                   {peerNodes.filter((p) => p.status === 'online').length}/{peerNodes.length} WS LINK
                 </span>
               </div>
@@ -370,14 +514,31 @@ export function MeshView({
           {/* Peer Spoke 列表 */}
           <div className="space-y-2 lg:col-span-5">
             {peerNodes.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-border bg-surface/50 p-4 text-ui-xs text-foreground-subtle">
-                {t('mesh.topology.emptyPeerHint')}
+              <div className="flex flex-col gap-3 rounded-xl border border-dashed border-border bg-surface/50 p-4 text-ui-xs text-foreground-subtle">
+                <p>{t('mesh.topology.emptyPeerHint')}</p>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap gap-1.5 font-mono text-[10px] text-foreground-subtlest">
+                    <span className="rounded bg-card px-1.5 py-0.5">VMware NAT</span>
+                    <span className="rounded bg-card px-1.5 py-0.5">WSL2</span>
+                    <span className="rounded bg-card px-1.5 py-0.5">Tailscale</span>
+                    <span className="rounded bg-card px-1.5 py-0.5">LAN</span>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={pairingBusy}
+                    onClick={() => void handleGeneratePairing()}
+                    className="cursor-pointer rounded-lg bg-signal px-2.5 py-1 text-ui-xs font-medium text-white transition-opacity duration-150 hover:opacity-90 disabled:opacity-60"
+                  >
+                    {pairingBusy ? t('mesh.hub.generating') : t('mesh.topology.quickPairBtn')}
+                  </button>
+                </div>
               </div>
             ) : (
               peerNodes.map((peer) => (
                 <button
                   key={peer.nodeId}
                   type="button"
+                  data-no-press=""
                   onClick={() => onInspectNode(peer.nodeId)}
                   className="flex w-full cursor-pointer items-center justify-between gap-3 rounded-xl border border-border bg-surface px-3.5 py-2.5 text-left transition-colors duration-150 hover:border-cobalt/60 hover:bg-card"
                 >
@@ -418,17 +579,25 @@ export function MeshView({
           </span>
         </header>
 
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
-          {nodes.map((node) => {
+        <div
+          className={
+            nodes.length === 1
+              ? 'grid grid-cols-1 gap-4'
+              : nodes.length === 2
+                ? 'grid grid-cols-1 gap-4 md:grid-cols-2'
+                : 'grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3'
+          }
+        >
+          {nodes.map((node, idx) => {
             const memPct = Math.round(
               Math.max(0, Math.min(100, node.hwSummary.ramUsedPercent || 0))
             )
             const isConfirming = confirmRemoveId === node.nodeId
             return (
-              <article
-                key={node.nodeId}
-                className="nx-card-elevated flex flex-col justify-between gap-3 rounded-xl bg-card p-4"
-              >
+              <ScrollReveal key={node.nodeId} delayMs={Math.min(idx, 5) * 60}>
+                <article
+                  className="nx-card-elevated nx-spotlight-card flex h-full flex-col justify-between gap-3 rounded-xl bg-card p-4"
+                >
                 <div className="space-y-3">
                   {/* 卡头：图标、别名编辑、角色与在线灯 */}
                   <div className="flex items-start justify-between gap-2">
@@ -529,98 +698,108 @@ export function MeshView({
                     </div>
                   </div>
 
-                  {/* 硬件画像区 */}
-                  <div className="space-y-1.5 rounded-lg bg-surface p-2.5 text-ui-xs">
-                    <div className="flex items-center justify-between gap-2 text-foreground-subtle">
-                      <span className="truncate" title={node.hwSummary.cpuModel}>
-                        {node.hwSummary.cpuModel || 'CPU'}
-                      </span>
-                      <span className="shrink-0 font-mono tabular-nums text-foreground">
-                        {node.hwSummary.cpuCores}C · {Math.round(node.hwSummary.cpuLoadPercent)}%
-                      </span>
-                    </div>
-
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between font-mono text-[10px] text-foreground-subtlest">
-                        <span>{t('system.memory')}</span>
-                        <span className="tabular-nums text-foreground-subtle">
-                          {formatRamGb(node.hwSummary.ramUsedBytes)}/
-                          {formatRamGb(node.hwSummary.ramTotalBytes)} GB ({memPct}%)
+                  <div
+                    className={
+                      nodes.length === 1
+                        ? 'grid grid-cols-1 gap-3 md:grid-cols-2 md:items-start'
+                        : 'space-y-3'
+                    }
+                  >
+                    {/* 硬件画像区 */}
+                    <div className="space-y-1.5 rounded-lg bg-surface p-2.5 text-ui-xs">
+                      <div className="flex items-center justify-between gap-2 text-foreground-subtle">
+                        <span className="truncate" title={node.hwSummary.cpuModel}>
+                          {node.hwSummary.cpuModel || 'CPU'}
+                        </span>
+                        <span className="shrink-0 font-mono tabular-nums text-foreground">
+                          {node.hwSummary.cpuCores}C · {Math.round(node.hwSummary.cpuLoadPercent)}%
                         </span>
                       </div>
-                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-hairline">
-                        <div
-                          className="h-full rounded-full transition-[width] duration-300"
-                          style={{
-                            width: `${Math.max(4, memPct)}%`,
-                            backgroundColor: memPct > 85 ? 'var(--nx-signal)' : 'var(--nx-cobalt)'
-                          }}
-                        />
-                      </div>
-                    </div>
 
-                    {node.hwSummary.gpuModel && (
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between font-mono text-[10px] text-foreground-subtlest">
+                          <span>{t('system.memory')}</span>
+                          <span className="tabular-nums text-foreground-subtle">
+                            {formatRamGb(node.hwSummary.ramUsedBytes)}/
+                            {formatRamGb(node.hwSummary.ramTotalBytes)} GB ({memPct}%)
+                          </span>
+                        </div>
+                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-hairline">
+                          <div
+                            className="h-full rounded-full transition-[width] duration-300"
+                            style={{
+                              width: `${Math.max(4, memPct)}%`,
+                              backgroundColor: memPct > 85 ? 'var(--nx-signal)' : 'var(--nx-cobalt)'
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      {node.hwSummary.gpuModel && (
+                        <div className="truncate font-mono text-[10px] text-foreground-subtlest">
+                          GPU · {node.hwSummary.gpuModel}
+                        </div>
+                      )}
                       <div className="truncate font-mono text-[10px] text-foreground-subtlest">
-                        GPU · {node.hwSummary.gpuModel}
+                        OS · {osSummary(node.hwSummary)}
                       </div>
-                    )}
-                    <div className="truncate font-mono text-[10px] text-foreground-subtlest">
-                      OS · {osSummary(node.hwSummary)}
+                    </div>
+
+                    {/* 链路、水位线与活跃 Agent */}
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 gap-2 text-ui-xs">
+                        <div>
+                          <div className="text-[10px] text-foreground-subtlest">{t('mesh.node.link')}</div>
+                          <div className="truncate font-mono text-foreground">
+                            {transportLabel(node.transport)}
+                            {node.rttMs != null ? ` · ${node.rttMs}ms` : ''}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-[10px] text-foreground-subtlest">{t('mesh.node.tokens')}</div>
+                          <div
+                            className="font-mono tabular-nums text-foreground"
+                            title={t('mesh.node.recordsTip', {
+                              tokens: fullNumber(node.totalTokens),
+                              n: fullNumber(node.recordCount)
+                            })}
+                          >
+                            {compactNumber(node.totalTokens)} ({node.recordCount})
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-foreground-subtlest">
+                            {t('mesh.node.watermark')}
+                          </div>
+                          <div className="truncate font-mono text-[10px] tabular-nums text-foreground-subtle">
+                            U{node.ackedWatermark.usageId} · S{node.ackedWatermark.sessionSeq} · T
+                            {node.ackedWatermark.toolId}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-[10px] text-foreground-subtlest">
+                            {t('mesh.node.lastSeen')}
+                          </div>
+                          <div className="font-mono text-[10px] text-foreground-subtle">
+                            {node.isLocal ? t('time.justNow') : relativeTime(node.lastSeenAt)}
+                          </div>
+                        </div>
+                      </div>
+
+                      {node.activeAgents.length > 0 && (
+                        <div className="flex flex-wrap gap-1">
+                          {node.activeAgents.map((aid) => (
+                            <span
+                              key={aid}
+                              className="rounded bg-surface px-1.5 py-0.5 text-[10px] text-foreground-subtle"
+                            >
+                              {agentLabels.get(aid) ?? aid}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
-
-                  {/* 链路、水位线与活跃 Agent */}
-                  <div className="grid grid-cols-2 gap-2 text-ui-xs">
-                    <div>
-                      <div className="text-[10px] text-foreground-subtlest">{t('mesh.node.link')}</div>
-                      <div className="truncate font-mono text-foreground">
-                        {transportLabel(node.transport)}
-                        {node.rttMs != null ? ` · ${node.rttMs}ms` : ''}
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-[10px] text-foreground-subtlest">{t('mesh.node.tokens')}</div>
-                      <div
-                        className="font-mono tabular-nums text-foreground"
-                        title={t('mesh.node.recordsTip', {
-                          tokens: fullNumber(node.totalTokens),
-                          n: fullNumber(node.recordCount)
-                        })}
-                      >
-                        {compactNumber(node.totalTokens)} ({node.recordCount})
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] text-foreground-subtlest">
-                        {t('mesh.node.watermark')}
-                      </div>
-                      <div className="truncate font-mono text-[10px] tabular-nums text-foreground-subtle">
-                        U{node.ackedWatermark.usageId} · S{node.ackedWatermark.sessionSeq} · T
-                        {node.ackedWatermark.toolId}
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-[10px] text-foreground-subtlest">
-                        {t('mesh.node.lastSeen')}
-                      </div>
-                      <div className="font-mono text-[10px] text-foreground-subtle">
-                        {node.isLocal ? t('time.justNow') : relativeTime(node.lastSeenAt)}
-                      </div>
-                    </div>
-                  </div>
-
-                  {node.activeAgents.length > 0 && (
-                    <div className="flex flex-wrap gap-1">
-                      {node.activeAgents.map((aid) => (
-                        <span
-                          key={aid}
-                          className="rounded bg-surface px-1.5 py-0.5 text-[10px] text-foreground-subtle"
-                        >
-                          {agentLabels.get(aid) ?? aid}
-                        </span>
-                      ))}
-                    </div>
-                  )}
                 </div>
 
                 {/* 卡脚操作 */}
@@ -667,15 +846,20 @@ export function MeshView({
                     ))}
                 </div>
               </article>
+              </ScrollReveal>
             )
           })}
         </div>
       </section>
 
       {/* 双向极简配对面板 */}
-      <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        {/* 左：Hub 端生成配对码 & 多网段地址 */}
-        <div className="nx-card-elevated flex flex-col justify-between gap-3 rounded-xl bg-card p-5">
+      <ScrollReveal delayMs={60}>
+        <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          {/* 左：Hub 端生成配对码 & 多网段地址 */}
+          <div
+            ref={pairingPanelRef}
+            className="nx-card-elevated nx-spotlight-card flex flex-col justify-between gap-3 rounded-xl bg-card p-5"
+          >
           <div className="space-y-3">
             <div className="flex items-start justify-between gap-2">
               <div>
@@ -702,8 +886,26 @@ export function MeshView({
               {pairingBusy ? t('mesh.hub.generating') : t('mesh.hub.generate')}
             </button>
 
-            {pairing && (
-              <div className="space-y-3 rounded-xl border border-border bg-surface p-3.5">
+            {!pairing ? (
+              <div className="space-y-2 rounded-xl border border-hairline bg-surface/65 p-3">
+                <div className="text-[10px] font-medium text-foreground-subtle">
+                  {t('mesh.hub.readyTitle')}
+                </div>
+                <div className="grid grid-cols-2 gap-1.5 font-mono text-[10px] text-foreground-subtle">
+                  <div className="rounded-md bg-card px-2 py-1.5">VMware / Hyper-V NAT</div>
+                  <div className="rounded-md bg-card px-2 py-1.5">WSL2 vSwitch</div>
+                  <div className="rounded-md bg-card px-2 py-1.5">LAN / Tailscale</div>
+                  <div className="rounded-md bg-card px-2 py-1.5">Headless CLI Daemon</div>
+                </div>
+              </div>
+            ) : (
+              <div className="relative space-y-3 overflow-hidden rounded-xl border border-border bg-surface p-3.5">
+                <BorderBeam
+                  active={pairingSecondsLeft > 0}
+                  durationSec={3.6}
+                  fromColor="var(--nx-success)"
+                  toColor="var(--nx-cobalt)"
+                />
                 <div className="flex flex-wrap items-center gap-4">
                   {pairing.qrDataUrl && (
                     <img
@@ -787,10 +989,16 @@ export function MeshView({
               </div>
             )}
           </div>
+
+          {!pairing && (
+            <div className="rounded-lg bg-surface/60 px-3 py-2 text-ui-xs text-foreground-subtlest">
+              {t('mesh.hub.readyTip')}
+            </div>
+          )}
         </div>
 
         {/* 右：Spoke 端接入主 Hub */}
-        <div className="nx-card-elevated flex flex-col justify-between gap-3 rounded-xl bg-card p-5">
+        <div className="nx-card-elevated nx-spotlight-card flex flex-col justify-between gap-3 rounded-xl bg-card p-5">
           <div className="space-y-3">
             <div className="flex items-start justify-between gap-2">
               <div>
@@ -896,7 +1104,18 @@ export function MeshView({
             {t('mesh.spoke.tip')}
           </div>
         </div>
-      </section>
-    </main>
+        </section>
+      </ScrollReveal>
+
+      {/* 集群节点与适配生态跑马灯条（悬停即停，仅作底层生态与遥测巡检） */}
+      <ScrollReveal delayMs={80}>
+        <NexusTelemetryMarquee
+          mode="mesh"
+          agents={agents}
+          nodes={nodes}
+          onSelectNode={onInspectNode}
+        />
+      </ScrollReveal>
+    </SpotlightGroup>
   )
 }

@@ -1,20 +1,31 @@
 // Nexus 主界面：三栏布局（规范 §6）—— 顶栏 + Agent 侧栏 + 图表矩阵 + 会话明细。
 
-import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import type { EChartsOption } from 'echarts'
 import { nexus } from './lib/api'
-import { CURSOR_TOAST_EVENT } from './lib/cursorConfig'
+import {
+  clearCursorDegraded,
+  CURSOR_CONFIG_CHANGED_EVENT,
+  CURSOR_TOAST_EVENT,
+  readCursorEnabled,
+  writeCursorEnabled
+} from './lib/cursorConfig'
 import { useUi } from './store'
 import { useDashboard } from './useDashboard'
 import { useMesh } from './useMesh'
 import { EChart } from './charts/EChart'
 import { AgentSidebar } from './components/AgentSidebar'
+import { CommandPalette } from './components/CommandPalette'
 import { CursorSettingsSection, GlobalCursorMount } from './components/CustomCursor'
+import { ExportMenu } from './components/ExportMenu'
 import { MeshView } from './components/MeshView'
+import { ScrollReveal, SpotlightGroup, useViewCrossfade } from './components/MotionEffects'
 import { NodeSwitcherBar } from './components/NodeSwitcherBar'
 import { MeshGlyph, nodeDisplayName } from './components/NodeVisuals'
+import { SessionInspectorDrawer } from './components/SessionInspectorDrawer'
 import { SessionsPanel, type SessionNodeMeta } from './components/SessionsPanel'
+import { SettingsPreferencesSection } from './components/SettingsPreferencesSection'
 import { SlidingTabIndicator } from './components/SmoothHighlight'
 import { SystemPill } from './components/SystemPill'
 import { AccountPanel } from './components/AccountPanel'
@@ -26,7 +37,6 @@ import { AnimatedNumber } from './components/RollingNumber'
 import {
   ChartCard,
   EmptyState,
-  ExportIcon,
   GearIcon,
   IconButton,
   KpiCard,
@@ -51,23 +61,28 @@ import {
 import {
   compactNumber,
   formatCost,
+  formatCostPrecise,
   fullNumber,
   relativeTime,
   shortDir
 } from './lib/format'
-import type { NamedStat, RangeKey } from '@shared/types'
+import type { ExportFormat, NamedStat, RangeKey, SessionRow } from '@shared/types'
 
 export default function App(): JSX.Element {
   const activeView = useUi((s) => s.activeView)
   const selectedNodeId = useUi((s) => s.selectedNodeId)
+  const selectedProjectDir = useUi((s) => s.selectedProjectDir)
   const range = useUi((s) => s.range)
   const agent = useUi((s) => s.agent)
   const theme = useUi((s) => s.theme)
   const uiStyle = useUi((s) => s.uiStyle)
+  const customRange = useUi((s) => s.customRange)
+  const pricingConfig = useUi((s) => s.pricingConfig)
   // 语言订阅：切换语言时触发 App 重渲染（各子组件自行 useLang）
   useLang()
   const setActiveView = useUi((s) => s.setActiveView)
   const setSelectedNodeId = useUi((s) => s.setSelectedNodeId)
+  const setSelectedProjectDir = useUi((s) => s.setSelectedProjectDir)
   const setTheme = useUi((s) => s.setTheme)
   const setUiStyle = useUi((s) => s.setUiStyle)
   const setAgent = useUi((s) => s.setAgent)
@@ -77,6 +92,12 @@ export default function App(): JSX.Element {
   const [toast, setToast] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [sessionsDrawerOpen, setSessionsDrawerOpen] = useState(false)
+  const [cmdkOpen, setCmdkOpen] = useState(false)
+  const [quickPairNonce, setQuickPairNonce] = useState(0)
+  const [cursorEnabled, setCursorEnabled] = useState(readCursorEnabled)
+  const [leftChartMode, setLeftChartMode] = useState<'agent' | 'project'>('agent')
+  const [inspectedSession, setInspectedSession] = useState<SessionRow | null>(null)
+  const boardContentRef = useRef<HTMLDivElement>(null)
   const [retention, setRetention] = useState<number>(0)
   const [remoteOn, setRemoteOn] = useState(false)
   const [remoteStatus, setRemoteStatus] = useState<Awaited<ReturnType<typeof nexus.getRemoteStatus>> | null>(null)
@@ -84,7 +105,7 @@ export default function App(): JSX.Element {
   const [dshStatus, setDshStatus] = useState<Awaited<ReturnType<typeof nexus.getDshStatus>> | null>(null)
   const [dshSessions, setDshSessions] = useState<Awaited<ReturnType<typeof nexus.getDshSessions>>>([])
 
-  // 启动时读取主题与上次时间范围（含自定义范围的起止）
+  // 启动时读取主题、时间范围与定价配置
   useEffect(() => {
     void (async () => {
       const s = await nexus.getSettings()
@@ -94,7 +115,13 @@ export default function App(): JSX.Element {
       useUi.getState().setRange(r)
       const cr = await nexus.getCustomRange()
       if (cr) useUi.getState().setCustomRange(cr)
+      const pcfg = await nexus.getPricingConfig()
+      useUi.getState().setPricingConfig(pcfg, false)
     })()
+    const unsubAlert = nexus.onAppAlert((alert) => {
+      setToast(`${alert.title}：${alert.body}`)
+    })
+    return () => unsubAlert()
   }, [])
 
   // 自定义时间范围选择浮层
@@ -141,15 +168,33 @@ export default function App(): JSX.Element {
     setThemeEpoch((v) => v + 1)
   }, [theme, uiStyle])
 
-  // toast 自动消失 + 接收自定义光标系统提示事件
+  // toast 自动消失 + 接收自定义光标系统提示事件 + 全局 Ctrl+K 命令面板快捷键
   useEffect(() => {
     const onCursorToast = (e: Event): void => {
       const msg = (e as CustomEvent<string>).detail
       if (msg) setToast(msg)
     }
+    const onCursorCfg = (): void => setCursorEnabled(readCursorEnabled())
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setCmdkOpen((v) => !v)
+      }
+    }
     window.addEventListener(CURSOR_TOAST_EVENT, onCursorToast)
-    return () => window.removeEventListener(CURSOR_TOAST_EVENT, onCursorToast)
+    window.addEventListener(CURSOR_CONFIG_CHANGED_EVENT, onCursorCfg)
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener(CURSOR_TOAST_EVENT, onCursorToast)
+      window.removeEventListener(CURSOR_CONFIG_CHANGED_EVENT, onCursorCfg)
+      window.removeEventListener('keydown', onKeyDown)
+    }
   }, [])
+
+  useViewCrossfade(
+    boardContentRef,
+    `${range}:${agent ?? 'all'}:${selectedNodeId ?? 'all'}:${selectedProjectDir ?? 'all'}`
+  )
 
   useEffect(() => {
     if (!toast) return
@@ -192,11 +237,30 @@ export default function App(): JSX.Element {
     [colorOrderIds, tokens]
   )
 
-  const handleExport = async (): Promise<void> => {
-    const r = await nexus.exportBoard()
+  const handleExport = async (format: ExportFormat = 'png'): Promise<void> => {
+    const r = await nexus.exportReport(format, {
+      range,
+      agent,
+      customStart: range === 'custom' ? customRange?.start : undefined,
+      customEnd: range === 'custom' ? customRange?.end : undefined,
+      nodeId: selectedNodeId,
+      projectDir: selectedProjectDir
+    })
     if (r.ok && r.path) setToast(t('toast.export.done', { path: r.path }))
     else if (!r.ok && !r.canceled) setToast(t('toast.export.failed', { err: r.error ?? t('toast.unknownError') }))
   }
+
+  const exportScopeLabel = [
+    t(`range.${range}`),
+    agent ? agentLabels.get(agent) ?? agent : null,
+    selectedProjectDir
+      ? selectedProjectDir === '__unassigned__'
+        ? t('chart.projectRank.unassigned')
+        : shortDir(selectedProjectDir)
+      : null
+  ]
+    .filter(Boolean)
+    .join(' · ')
 
   const toggleTheme = async (): Promise<void> => {
     const next = theme === 'dark' ? 'light' : 'dark'
@@ -307,44 +371,32 @@ export default function App(): JSX.Element {
     return donutOption(items, (name) => agentColors.get(name) ?? tokens.series[0], tokens)
   }, [data, tokens, agentColors])
 
-  // 单选某个 Agent 时，「Agent 占比」卡片自动切换为该 Agent 的「工作区/项目消耗排行」
+  // 支持跨 Agent 全局项目归因 & 单 Agent 工作区排行；柱条点击按工作区下钻过滤
   const { projectBarOpt, projectDirByName } = useMemo(() => {
     const dirMap = new Map<string, string>()
-    if (!data || !agent || data.sessions.length === 0) {
+    if (!data || data.byProject.length === 0) {
       return { projectBarOpt: null, projectDirByName: dirMap }
     }
     const unassigned = t('chart.projectRank.unassigned')
-    const byProj = new Map<string, { tokens: number; requests: number; fullDir: string | null }>()
-    for (const s of data.sessions) {
-      if (s.tokens <= 0) continue
-      const label = shortDir(s.projectDir) || unassigned
-      const prev = byProj.get(label)
-      if (prev) {
-        prev.tokens += s.tokens
-        prev.requests += s.requests
-      } else {
-        byProj.set(label, { tokens: s.tokens, requests: s.requests, fullDir: s.projectDir })
-        if (s.projectDir) dirMap.set(label, s.projectDir)
+    const stats: NamedStat[] = data.byProject.slice(0, 8).map((p) => {
+      const displayName = p.projectDir ? p.name : unassigned
+      dirMap.set(displayName, p.projectDir ?? '__unassigned__')
+      return {
+        name: displayName,
+        tokens: p.tokens,
+        requests: p.requests,
+        input: p.input,
+        output: p.output,
+        cacheRead: p.cacheRead,
+        cacheWrite: p.cacheWrite
       }
-    }
-    const stats: NamedStat[] = [...byProj.entries()]
-      .map(([name, v]) => ({
-        name,
-        tokens: v.tokens,
-        requests: v.requests,
-        input: 0,
-        output: 0,
-        cacheRead: 0,
-        cacheWrite: 0
-      }))
-      .sort((a, b) => b.tokens - a.tokens)
-      .slice(0, 8)
+    })
     if (stats.length === 0) return { projectBarOpt: null, projectDirByName: dirMap }
     return {
       projectBarOpt: rankBarOption(stats, tokens, true, 'tokens'),
       projectDirByName: dirMap
     }
-  }, [data, agent, tokens])
+  }, [data, tokens])
 
   const modelBarOpt = useMemo<EChartsOption | null>(() => {
     if (!data || data.byModel.length === 0) return null
@@ -439,6 +491,19 @@ export default function App(): JSX.Element {
             )}
           </button>
         </nav>
+        <button
+          type="button"
+          data-cmdk-trigger=""
+          style={{WebkitAppRegion: "no-drag"} as React.CSSProperties}
+          onClick={() => setCmdkOpen(true)}
+          title={`${t('cmdk.button')} (Ctrl+K)`}
+          className="hidden h-7 cursor-pointer items-center gap-1.5 rounded-full border border-hairline bg-surface px-2.5 text-ui-xs text-foreground-subtle transition-colors duration-150 hover:border-border hover:bg-hover hover:text-foreground sm:flex"
+        >
+          <span>{t('cmdk.button')}</span>
+          <kbd className="rounded bg-card px-1 py-0.5 font-mono text-[10px] leading-none text-foreground-subtlest">
+            Ctrl K
+          </kbd>
+        </button>
         <div className="flex-1" style={{WebkitAppRegion: "no-drag"} as React.CSSProperties} />
         {sync.phase === 'running' && (
           <span className="text-ui-xs text-foreground-subtle">{t('header.syncing')}</span>
@@ -510,9 +575,7 @@ export default function App(): JSX.Element {
         <IconButton title={theme === 'dark' ? t('header.action.toggleLight') : t('header.action.toggleDark')} onClick={() => void toggleTheme()}>
           {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
         </IconButton>
-        <IconButton style={{WebkitAppRegion: "no-drag"} as React.CSSProperties} title={t('header.action.exportPng')} onClick={() => void handleExport()}>
-          <ExportIcon />
-        </IconButton>
+        <ExportMenu scopeLabel={exportScopeLabel} onExport={handleExport} />
         {activeView === 'board' && (
           <button
             type="button"
@@ -535,7 +598,7 @@ export default function App(): JSX.Element {
           <>
             <div className="fixed inset-0 z-10" onClick={() => setSettingsOpen(false)} />
             <div
-              className="nx-fade-in nx-card-elevated absolute right-3 top-12 z-20 max-h-[84vh] w-80 overflow-y-auto rounded-xl border border-border bg-card p-4"
+              className="nx-fade-in nx-card-elevated absolute right-3 top-12 z-20 max-h-[84vh] w-[360px] overflow-y-auto rounded-xl border border-border bg-card p-4"
               role="dialog"
             >
             <div className="mb-3 text-ui-base font-medium">{t('settings.title')}</div>
@@ -580,6 +643,7 @@ export default function App(): JSX.Element {
             </div>
             <div className="my-3 h-px bg-hairline" />
             <CursorSettingsSection />
+            <SettingsPreferencesSection onToast={setToast} />
             <div className="my-3 h-px bg-hairline" />
             <label className="mb-1 block text-ui-xs text-foreground-subtle">{t('settings.retention')}</label>
             <select
@@ -749,8 +813,10 @@ export default function App(): JSX.Element {
           <MeshView
             meshStatus={meshStatus}
             actions={meshActions}
+            agents={agents}
             sessions={data?.sessions ?? []}
             agentLabels={agentLabels}
+            quickPairNonce={quickPairNonce}
             onInspectNode={(nid) => {
               setSelectedNodeId(nid)
               setActiveView('board')
@@ -761,7 +827,8 @@ export default function App(): JSX.Element {
           <>
             <AgentSidebar agents={agents} lastSyncAt={sync.finishedAt} />
 
-            <main
+            <SpotlightGroup
+              as="main"
               style={{ opacity: loading ? 0.55 : 1 }}
               className="nx-shell-bg min-w-0 flex-1 space-y-4 overflow-y-auto rounded-xl border border-hairline bg-panel p-4 transition-opacity duration-150"
             >
@@ -771,6 +838,44 @@ export default function App(): JSX.Element {
                 onSelectNode={setSelectedNodeId}
                 onOpenMeshView={() => setActiveView('mesh')}
               />
+              {selectedProjectDir && (
+                <div
+                  data-project-filter-chip=""
+                  className="nx-fade-in flex flex-wrap items-center justify-between gap-2 rounded-xl border border-cobalt/35 bg-cobalt/10 px-3.5 py-2 text-ui-xs"
+                >
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="shrink-0 font-medium text-cobalt">{t('projectFilter.label')}</span>
+                    <span
+                      className="min-w-0 truncate font-mono text-foreground"
+                      title={selectedProjectDir === '__unassigned__' ? t('chart.projectRank.unassigned') : selectedProjectDir}
+                    >
+                      {selectedProjectDir === '__unassigned__'
+                        ? t('chart.projectRank.unassigned')
+                        : `${shortDir(selectedProjectDir)} · ${selectedProjectDir}`}
+                    </span>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    {selectedProjectDir !== '__unassigned__' && (
+                      <button
+                        type="button"
+                        onClick={() => void nexus.openPath(selectedProjectDir).catch(() => undefined)}
+                        className="rounded-md border border-hairline bg-card px-2 py-0.5 text-[11px] text-foreground transition-colors hover:bg-hover"
+                      >
+                        {t('projectFilter.openDir')}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      data-clear-project-filter=""
+                      onClick={() => setSelectedProjectDir(null)}
+                      className="rounded-md bg-card px-2 py-0.5 text-[11px] text-foreground-subtle transition-colors hover:bg-hover hover:text-foreground"
+                    >
+                      × {t('projectFilter.clear')}
+                    </button>
+                  </div>
+                </div>
+              )}
+              <div ref={boardContentRef} className="space-y-4">
               {!data ? (
             <EmptyState title={t('empty.loading.title')} description={t('empty.loading.desc')} />
           ) : totalTokens === 0 && data.sessions.length === 0 ? (
@@ -854,11 +959,15 @@ export default function App(): JSX.Element {
                 </div>
               )}
               {/* KPI 矩阵 */}
-              <div className="grid grid-cols-2 gap-4 2xl:grid-cols-4">
+              <div
+                style={{ opacity: loading ? 0.55 : 1 }}
+                className="grid grid-cols-2 gap-4 transition-opacity duration-150 2xl:grid-cols-4"
+              >
                 <KpiCard
                   label={t('kpi.tokens')}
                   indexTag="01"
                   accent="signal"
+                  featured={agents.some((a) => a.status === 'active')}
                   progressPct={
                     range !== 'all' && histTokens > 0
                       ? (totalTokens / histTokens) * 100
@@ -903,8 +1012,8 @@ export default function App(): JSX.Element {
                   value={
                     <AnimatedNumber
                       num={data.overview.totals.estimatedCostUsd}
-                      compactFormat={formatCost}
-                      fullFormat={(n) => `$${n.toFixed(4)}`}
+                      compactFormat={(n) => formatCost(n, pricingConfig)}
+                      fullFormat={(n) => formatCostPrecise(n, pricingConfig)}
                     />
                   }
                   sub={t('kpi.cost.sub')}
@@ -956,34 +1065,46 @@ export default function App(): JSX.Element {
                 </ChartCard>
               </div>
 
-              {/* Agent 占比（全局视图） / 工作区消耗排行（单 Agent 视图） + 模型排行 */}
+              {/* Agent 占比 / 跨 Agent 全局项目归因 + 模型排行 */}
               <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
                 <ChartCard
-                  title={agent ? t('chart.projectRank') : t('chart.agentShare')}
+                  title={agent || leftChartMode === 'project' ? t('chart.projectRank') : t('chart.agentShare')}
                   actions={
-                    agent ? (
-                      <button
-                        type="button"
-                        onClick={() => setAgent(null)}
-                        className="rounded-lg px-2 py-0.5 text-ui-xs text-foreground-subtle transition-colors duration-150 hover:bg-hover hover:text-foreground"
-                      >
-                        {t('chart.agentShare.filtered', { agent: agentLabels.get(agent) ?? agent })}
-                      </button>
-                    ) : (
-                      <span className="text-ui-xs text-foreground-subtlest">{t('chart.agentShare.drill')}</span>
-                    )
+                    <div className="flex items-center gap-1.5">
+                      {!agent && (
+                        <PillSwitcher
+                          options={[
+                            { key: 'agent' as const, label: t('chart.shareMode.agent') },
+                            { key: 'project' as const, label: t('chart.shareMode.project') }
+                          ]}
+                          value={leftChartMode}
+                          onChange={setLeftChartMode}
+                        />
+                      )}
+                      {agent && (
+                        <button
+                          type="button"
+                          onClick={() => setAgent(null)}
+                          className="rounded-lg px-2 py-0.5 text-ui-xs text-foreground-subtle transition-colors duration-150 hover:bg-hover hover:text-foreground"
+                        >
+                          {t('chart.agentShare.filtered', { agent: agentLabels.get(agent) ?? agent })}
+                        </button>
+                      )}
+                    </div>
                   }
                 >
-                  {agent ? (
+                  {agent || leftChartMode === 'project' ? (
                     projectBarOpt != null ? (
-                      <EChart
-                        option={projectBarOpt}
-                        className="h-60 w-full"
-                        onClick={(name) => {
-                          const dir = projectDirByName.get(name)
-                          if (dir) void nexus.openPath(dir).catch(() => undefined)
-                        }}
-                      />
+                      <div title={t('chart.projectRank.drill')}>
+                        <EChart
+                          option={projectBarOpt}
+                          className="h-60 w-full"
+                          onClick={(name) => {
+                            const dir = projectDirByName.get(name)
+                            if (dir) setSelectedProjectDir(selectedProjectDir === dir ? null : dir)
+                          }}
+                        />
+                      </div>
                     ) : (
                       <EmptyState title={t('chart.empty.title')} description={t('chart.projectRank.empty.desc')} />
                     )
@@ -1019,38 +1140,43 @@ export default function App(): JSX.Element {
                 </div>
               </div>
 
-              {/* 热力图 + 工具排行 */}
-              <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-                <div className="xl:col-span-2">
-                  <ChartCard
-                    title={t('chart.heatmap')}
-                    actions={
-                      <span className="text-ui-xs text-foreground-subtlest">
-                        {cacheHit != null ? t('chart.heatmap.cacheHit', { pct: cacheHit.toFixed(1) }) : ''}
-                      </span>
-                    }
-                  >
-                    <EChart option={heatmapOpt ?? {}} className="h-48 w-full" />
+              {/* 热力图 + 工具排行（视口下方随滚动显现） */}
+              <ScrollReveal delayMs={40}>
+                <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+                  <div className="xl:col-span-2">
+                    <ChartCard
+                      title={t('chart.heatmap')}
+                      actions={
+                        <span className="text-ui-xs text-foreground-subtlest">
+                          {cacheHit != null ? t('chart.heatmap.cacheHit', { pct: cacheHit.toFixed(1) }) : ''}
+                        </span>
+                      }
+                    >
+                      <EChart option={heatmapOpt ?? {}} className="h-48 w-full" />
+                    </ChartCard>
+                  </div>
+                  <ChartCard title={t('chart.toolRank')}>
+                    {toolBarOpt != null ? (
+                      <EChart option={toolBarOpt} className="h-48 w-full" />
+                    ) : (
+                      <EmptyState title={t('chart.toolRank.empty.title')} description={t('chart.toolRank.empty.desc')} />
+                    )}
                   </ChartCard>
                 </div>
-                <ChartCard title={t('chart.toolRank')}>
-                  {toolBarOpt != null ? (
-                    <EChart option={toolBarOpt} className="h-48 w-full" />
-                  ) : (
-                    <EmptyState title={t('chart.toolRank.empty.title')} description={t('chart.toolRank.empty.desc')} />
-                  )}
-                </ChartCard>
-              </div>
+              </ScrollReveal>
 
-              {/* 每日强度 */}
+              {/* 每日强度（视口下方随滚动显现） */}
               {dailyBarOpt != null && (
-                <ChartCard title={t('chart.daily')}>
-                  <EChart option={dailyBarOpt} className="h-48 w-full" />
-                </ChartCard>
+                <ScrollReveal delayMs={70}>
+                  <ChartCard title={t('chart.daily')}>
+                    <EChart option={dailyBarOpt} className="h-48 w-full" />
+                  </ChartCard>
+                </ScrollReveal>
               )}
             </>
           )}
-            </main>
+              </div>
+            </SpotlightGroup>
 
             <div className="hidden 2xl:flex">
               <SessionsPanel
@@ -1058,6 +1184,12 @@ export default function App(): JSX.Element {
                 agentColors={agentColors}
                 nodeMetaById={nodeMetaById}
                 multiNode={multiNode}
+                selectedSessionKey={
+                  inspectedSession
+                    ? `${inspectedSession.sourceNodeId ?? 'local'}:${inspectedSession.agent}:${inspectedSession.sessionId}`
+                    : null
+                }
+                onSelectSession={(s) => setInspectedSession(s)}
               />
             </div>
             {sessionsDrawerOpen && (
@@ -1072,6 +1204,15 @@ export default function App(): JSX.Element {
                     agentColors={agentColors}
                     nodeMetaById={nodeMetaById}
                     multiNode={multiNode}
+                    selectedSessionKey={
+                      inspectedSession
+                        ? `${inspectedSession.sourceNodeId ?? 'local'}:${inspectedSession.agent}:${inspectedSession.sessionId}`
+                        : null
+                    }
+                    onSelectSession={(s) => {
+                      setSessionsDrawerOpen(false)
+                      setInspectedSession(s)
+                    }}
                     onClose={() => setSessionsDrawerOpen(false)}
                   />
                 </div>
@@ -1080,6 +1221,64 @@ export default function App(): JSX.Element {
           </>
         )}
       </div>
+
+      {/* 会话深度透视抽屉 */}
+      <SessionInspectorDrawer
+        session={inspectedSession}
+        agentLabel={inspectedSession ? agentLabels.get(inspectedSession.agent) ?? inspectedSession.agent : ''}
+        agentColor={
+          inspectedSession
+            ? agentColors.get(inspectedSession.agent) ?? tokens.series[0]
+            : tokens.series[0]
+        }
+        onClose={() => setInspectedSession(null)}
+        onFilterProject={(dir) => {
+          setSelectedProjectDir(dir)
+          setActiveView('board')
+        }}
+      />
+
+      {/* Ctrl+K 全局命令面板 */}
+      <CommandPalette
+        open={cmdkOpen}
+        onClose={() => setCmdkOpen(false)}
+        activeView={activeView}
+        onSelectView={setActiveView}
+        range={range}
+        onSelectRange={switchRangeQuick}
+        nodes={meshStatus?.nodes ?? []}
+        selectedNodeId={selectedNodeId}
+        onSelectNode={setSelectedNodeId}
+        projects={data?.byProject ?? []}
+        selectedProjectDir={selectedProjectDir}
+        onSelectProjectDir={setSelectedProjectDir}
+        agents={agents}
+        selectedAgent={agent}
+        onSelectAgent={setAgent}
+        theme={theme}
+        onToggleTheme={() => void toggleTheme()}
+        uiStyle={uiStyle}
+        onToggleUiStyle={() => void changeUiStyle(uiStyle === 'nexus' ? 'classic' : 'nexus')}
+        lang={getLang()}
+        onToggleLang={() => {
+          const next: Lang = getLang() === 'zh-CN' ? 'en' : 'zh-CN'
+          setLang(next)
+          void nexus.setTheme(theme)
+        }}
+        cursorEnabled={cursorEnabled}
+        onToggleCursor={() => {
+          const next = !readCursorEnabled()
+          if (next) clearCursorDegraded()
+          writeCursorEnabled(next)
+        }}
+        onSyncNow={() => void nexus.syncNow()}
+        onExportFormat={(fmt) => void handleExport(fmt)}
+        onOpenSettings={() => void openSettings()}
+        onQuickPair={() => {
+          setActiveView('mesh')
+          setQuickPairNonce((n) => n + 1)
+        }}
+      />
 
       {/* Toast */}
       {toast && (

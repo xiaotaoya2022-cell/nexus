@@ -8,7 +8,9 @@ import { vendorOf } from '@shared/vendors'
 import { nexus } from '@renderer/lib/api'
 import { compactNumber, fullNumber, relativeTime, shortDir, shortId } from '@renderer/lib/format'
 import { t, useLang } from '../i18n'
+import { useUi } from '@renderer/store'
 import { AgentLogo } from './AgentLogo'
+import { useDeltaFlashIds } from './MotionEffects'
 import { NodeKindIcon } from './NodeVisuals'
 import { AutoListHighlight, SlidingTabIndicator } from './SmoothHighlight'
 import { EmptyState } from './ui'
@@ -52,6 +54,8 @@ export function SessionsPanel({
   agentColors,
   nodeMetaById,
   multiNode = false,
+  selectedSessionKey,
+  onSelectSession,
   onClose
 }: {
   sessions: SessionRow[]
@@ -59,13 +63,26 @@ export function SessionsPanel({
   agentColors: Map<string, string>
   nodeMetaById?: Map<string, SessionNodeMeta>
   multiNode?: boolean
+  selectedSessionKey?: string | null
+  onSelectSession?: (session: SessionRow) => void
   onClose?: () => void
 }): JSX.Element {
   useLang() // 语言切换时重渲染
+  const range = useUi((s) => s.range)
+  const agent = useUi((s) => s.agent)
+  const selectedNodeId = useUi((s) => s.selectedNodeId)
+  const selectedProjectDir = useUi((s) => s.selectedProjectDir)
   const [hidden, setHidden] = useState(loadHidden)
   const [sortBy, setSortBy] = useState<SortBy>(loadSort)
   const [query, setQuery] = useState('')
   const listScrollRef = useRef<HTMLDivElement>(null)
+  const sessionKey = (s: SessionRow): string => `${s.sourceNodeId ?? 'local'}:${s.agent}:${s.sessionId}`
+  const flashingSessions = useDeltaFlashIds(
+    sessions,
+    sessionKey,
+    (s) => s.tokens,
+    `${range}:${agent ?? 'all'}:${selectedNodeId ?? 'all'}:${selectedProjectDir ?? 'all'}`
+  )
 
   const toggle = (): void => {
     setHidden((v) => {
@@ -205,18 +222,23 @@ export function SessionsPanel({
                         : t('sessions.openDir', { dir: s.projectDir })
                       : s.sessionId
                   ].join('\n')
+              const rowKey = sessionKey(s)
+              const isSelected = selectedSessionKey === rowKey
               return (
                 <li
-                  key={`${s.sourceNodeId ?? 'local'}:${s.agent}:${s.sessionId}`}
+                  key={rowKey}
                   data-list-row=""
+                  data-session-row=""
                   onClick={() => {
-                    if (canOpen && s.projectDir) {
+                    if (onSelectSession) {
+                      onSelectSession(s)
+                    } else if (canOpen && s.projectDir) {
                       void nexus.openPath(s.projectDir).catch(() => undefined)
                     }
                   }}
-                  className={`group flex items-center gap-2 rounded-lg px-2 py-1.5 transition-colors duration-150 hover:bg-surface ${
-                    canOpen ? 'cursor-pointer' : ''
-                  }`}
+                  className={`group flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 transition-colors duration-150 hover:bg-surface ${
+                    isSelected ? 'bg-selected ring-1 ring-inset ring-border' : ''
+                  } ${flashingSessions.has(rowKey) ? 'nx-delta-flash' : ''}`}
                   title={tip}
                 >
                   <span
@@ -257,6 +279,25 @@ export function SessionsPanel({
                       </span>
                     </span>
                   </span>
+                  {canOpen && s.projectDir && !hidden && (
+                    <button
+                      type="button"
+                      title={t('sessions.revealFolder')}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        if (s.projectDir) void nexus.openPath(s.projectDir).catch(() => undefined)
+                      }}
+                      className="hidden h-5 w-5 shrink-0 items-center justify-center rounded text-foreground-subtlest transition-colors duration-150 hover:bg-hover hover:text-foreground group-hover:flex"
+                    >
+                      <svg width="11" height="11" viewBox="0 0 14 14" fill="none" aria-hidden>
+                        <path
+                          d="M1.75 3.5C1.75 2.95 2.2 2.5 2.75 2.5H5.5L6.75 3.75H11.25C11.8 3.75 12.25 4.2 12.25 4.75V10.5C12.25 11.05 11.8 11.5 11.25 11.5H2.75C2.2 11.5 1.75 11.05 1.75 10.5V3.5Z"
+                          stroke="currentColor"
+                          strokeWidth="1.2"
+                        />
+                      </svg>
+                    </button>
+                  )}
                   <span
                     className="shrink-0 text-right font-mono text-ui-xs tabular-nums text-foreground-subtle"
                     title={t('sessions.tip', { tokens: fullNumber(s.tokens), n: s.requests })}

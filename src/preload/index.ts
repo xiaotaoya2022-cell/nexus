@@ -1,12 +1,29 @@
 // preload：以最小暴露面把 IPC 通道桥接为 window.nexus（contextIsolation 安全）。
 
 import { contextBridge, ipcRenderer } from 'electron'
-import type { MeshStatusInfo, NexusApi, Settings, SyncProgress, UiStyle } from '@shared/types'
+import type {
+  AppAlertEvent,
+  AppPreferences,
+  ExportFilter,
+  ExportFormat,
+  MeshStatusInfo,
+  NexusApi,
+  PricingConfig,
+  Settings,
+  SyncProgress,
+  UiStyle
+} from '@shared/types'
 
 const api: NexusApi = {
   getOverview: (range, agent) => ipcRenderer.invoke('nexus:getOverview', range, agent),
-  getBoard: (range, agent, customStart?: number, customEnd?: number, nodeId?: string | null) =>
-    ipcRenderer.invoke('nexus:getBoard', range, agent, customStart, customEnd, nodeId),
+  getBoard: (
+    range,
+    agent,
+    customStart?: number,
+    customEnd?: number,
+    nodeId?: string | null,
+    projectDir?: string | null
+  ) => ipcRenderer.invoke('nexus:getBoard', range, agent, customStart, customEnd, nodeId, projectDir),
   getCustomRange: () => ipcRenderer.invoke('nexus:getCustomRange'),
   setCustomRange: (start: number, end: number) =>
     ipcRenderer.invoke('nexus:setCustomRange', start, end),
@@ -29,9 +46,11 @@ const api: NexusApi = {
   getHeatmap: (range, agent) => ipcRenderer.invoke('nexus:getHeatmap', range, agent),
   getCalendar: (range, agent) => ipcRenderer.invoke('nexus:getCalendar', range, agent),
   getToolStats: (range, agent) => ipcRenderer.invoke('nexus:getToolStats', range, agent),
-  getAgents: (range, customStart, customEnd, nodeId) =>
-    ipcRenderer.invoke('nexus:getAgents', range, customStart, customEnd, nodeId),
+  getAgents: (range, customStart, customEnd, nodeId, projectDir) =>
+    ipcRenderer.invoke('nexus:getAgents', range, customStart, customEnd, nodeId, projectDir),
   getSessions: (range, agent, limit) => ipcRenderer.invoke('nexus:getSessions', range, agent, limit),
+  getSessionDetail: (agent, sessionId, nodeId) =>
+    ipcRenderer.invoke('nexus:getSessionDetail', agent, sessionId, nodeId),
   getMeshStatus: () => ipcRenderer.invoke('nexus:getMeshStatus'),
   setLocalNodeAlias: (alias) => ipcRenderer.invoke('nexus:setLocalNodeAlias', alias),
   setLocalNodeRole: (role) => ipcRenderer.invoke('nexus:setLocalNodeRole', role),
@@ -82,7 +101,21 @@ const api: NexusApi = {
       ipcRenderer.removeListener('nexus:quota-update', listener)
     }
   },
+  getPricingConfig: () => ipcRenderer.invoke('nexus:getPricingConfig'),
+  setPricingConfig: (config: PricingConfig) => ipcRenderer.invoke('nexus:setPricingConfig', config),
+  getAppPreferences: () => ipcRenderer.invoke('nexus:getAppPreferences'),
+  setAppPreferences: (prefs: Partial<AppPreferences>) =>
+    ipcRenderer.invoke('nexus:setAppPreferences', prefs),
+  onAppAlert: (cb: (alert: AppAlertEvent) => void) => {
+    const listener = (_e: unknown, alert: unknown): void => cb(alert as AppAlertEvent)
+    ipcRenderer.on('nexus:app-alert', listener)
+    return (): void => {
+      ipcRenderer.removeListener('nexus:app-alert', listener)
+    }
+  },
   exportBoard: () => ipcRenderer.invoke('nexus:exportBoard'),
+  exportReport: (format: ExportFormat, filter: ExportFilter) =>
+    ipcRenderer.invoke('nexus:exportReport', format, filter),
   openPath: (path) => ipcRenderer.invoke('nexus:openPath', path),
   onSyncProgress: (cb: (p: SyncProgress) => void) => {
     const listener = (_e: unknown, p: SyncProgress): void => cb(p)

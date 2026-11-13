@@ -2,7 +2,18 @@
 // 依赖方向：transport → application → domain ← infrastructure。
 
 import { ipcMain, dialog, BrowserWindow, nativeTheme, shell, app } from 'electron'
-import type { NexusApi, RangeKey, Settings, SyncProgress } from '@shared/types'
+import os from 'node:os'
+import type {
+  AppAlertEvent,
+  AppPreferences,
+  ExportFilter,
+  ExportFormat,
+  NexusApi,
+  PricingConfig,
+  RangeKey,
+  Settings,
+  SyncProgress
+} from '@shared/types'
 import type { QueryService } from '../modules/aggregator/application/query-service'
 import type { SyncService } from '../modules/aggregator/application/sync-service'
 import type { NexusStore } from '../modules/aggregator/infrastructure/store'
@@ -18,6 +29,14 @@ import type { RemoteServer } from '../modules/remote/server'
 import type { MeshService } from '../modules/mesh/service'
 import type { MeshStatusInfo, NodeRole } from '@shared/types'
 import { rangeStartMs } from '../modules/aggregator/application/query-service'
+import { normalizePricingConfig } from '../modules/aggregator/application/pricing'
+import { getAppPreferences, setAppPreferences } from '../modules/alerts/monitor'
+import {
+  formatCsvReport,
+  formatJsonReport,
+  formatMarkdownReport,
+  type ExportContext
+} from '../modules/export/report-exporter'
 import { TOTAL_EXPR } from '../modules/aggregator/infrastructure/store'
 
 const ACTIVE_WINDOW_MS = 15 * 60_000
@@ -37,6 +56,7 @@ export interface IpcDeps {
   remote: RemoteServer
   mesh?: MeshService
   getMainWindow: () => BrowserWindow | null
+  onEvaluateAlerts?: () => void
 }
 
 function resolveNodeFilter(store: NexusStore, nodeId?: string | null): string | null {
@@ -49,11 +69,13 @@ function buildAgentInfos(
   deps: IpcDeps,
   range: RangeKey = 'today',
   custom?: { start: number; end: number },
-  nodeId: string | null = null
+  nodeId: string | null = null,
+  projectDir: string | null = null
 ): AgentInfo[] {
   const now = Date.now()
   const todayStart = rangeStartMs('today', now)
   const nodeFilter = resolveNodeFilter(deps.store, nodeId)
+  const projFilter = typeof projectDir === 'string' && projectDir.trim() ? projectDir.trim() : null
   const isRemoteOnly = nodeFilter != null && nodeFilter !== 'local'
   const remoteActiveAgents = new Set<string>()
   for (const n of deps.store.listMeshNodeRecords()) {
@@ -65,28 +87,52 @@ function buildAgentInfos(
   for (const a of deps.adapters) known.set(a.id, { label: a.label, note: null })
   for (const p of deps.presence) known.set(p.id, { label: p.label, note: p.note })
 
+  const usageProjJoin =
+    projFilter && projFilter !== '__unassigned__'
+      ? 'INNER JOIN sessions sp ON sp.source_node_id = u.source_node_id AND sp.agent = u.agent AND sp.session_id = u.session_id'
+      : projFilter === '__unassigned__'
+        ? 'LEFT JOIN sessions sp ON sp.source_node_id = u.source_node_id AND sp.agent = u.agent AND sp.session_id = u.session_id'
+        : ''
+
+  const appendUsageFilters = (
+    conds: string[],
+    params: Array<string | number>
+  ): void => {
+    if (nodeFilter) {
+      conds.push('u.source_node_id = ?')
+      params.push(nodeFilter)
+    }
+    if (projFilter === '__unassigned__') {
+      conds.push("(u.session_id IS NULL OR sp.project_dir IS NULL OR TRIM(sp.project_dir) = '')")
+    } else if (projFilter) {
+      conds.push('sp.project_dir = ?')
+      params.push(projFilter)
+    }
+  }
+
   const todayByAgent = new Map<string, { tokens: number; requests: number }>()
   {
-    const sql = `SELECT agent, SUM(input_tokens+output_tokens+reasoning_tokens+cache_read_tokens+cache_write_tokens) t,
-                 COALESCE(SUM(requests), COUNT(*)) n FROM usage_records
-                 WHERE ts >= ? ${nodeFilter ? 'AND source_node_id = ?' : ''} GROUP BY agent`
-    const rows = (
-      nodeFilter
-        ? deps.store.db.prepare(sql).all(todayStart, nodeFilter)
-        : deps.store.db.prepare(sql).all(todayStart)
-    ) as Array<Record<string, unknown>>
+    const conds = ['u.ts >= ?']
+    const params: Array<string | number> = [todayStart]
+    appendUsageFilters(conds, params)
+    const sql = `SELECT u.agent, SUM(u.input_tokens+u.output_tokens+u.reasoning_tokens+u.cache_read_tokens+u.cache_write_tokens) t,
+                 COALESCE(SUM(u.requests), COUNT(*)) n FROM usage_records u ${usageProjJoin}
+                 WHERE ${conds.join(' AND ')} GROUP BY u.agent`
+    const rows = deps.store.db.prepare(sql).all(...params) as Array<Record<string, unknown>>
     for (const r of rows) {
       todayByAgent.set(String(r.agent), { tokens: Number(r.t) || 0, requests: Number(r.n) || 0 })
     }
   }
   const activity = new Map<string, { last: number | null; sessions: number; tokens: number }>()
   {
-    const sql = `SELECT agent, MAX(ts) last, COUNT(DISTINCT session_id) s,
-                 SUM(input_tokens+output_tokens+reasoning_tokens+cache_read_tokens+cache_write_tokens) t
-                 FROM usage_records ${nodeFilter ? 'WHERE source_node_id = ?' : ''} GROUP BY agent`
-    const rows = (
-      nodeFilter ? deps.store.db.prepare(sql).all(nodeFilter) : deps.store.db.prepare(sql).all()
-    ) as Array<Record<string, unknown>>
+    const conds: string[] = []
+    const params: Array<string | number> = []
+    appendUsageFilters(conds, params)
+    const whereClause = conds.length > 0 ? `WHERE ${conds.join(' AND ')}` : ''
+    const sql = `SELECT u.agent, MAX(u.ts) last, COUNT(DISTINCT u.session_id) s,
+                 SUM(u.input_tokens+u.output_tokens+u.reasoning_tokens+u.cache_read_tokens+u.cache_write_tokens) t
+                 FROM usage_records u ${usageProjJoin} ${whereClause} GROUP BY u.agent`
+    const rows = deps.store.db.prepare(sql).all(...params) as Array<Record<string, unknown>>
     for (const r of rows) {
       activity.set(String(r.agent), {
         last: r.last == null ? null : Number(r.last),
@@ -108,24 +154,34 @@ function buildAgentInfos(
       d.setHours(0, 0, 0, 0)
       until = d.getTime()
     }
-    const sql = `SELECT agent, SUM(input_tokens+output_tokens+reasoning_tokens+cache_read_tokens+cache_write_tokens) t
-                 FROM usage_records WHERE ts >= ? AND ts <= ? ${nodeFilter ? 'AND source_node_id = ?' : ''} GROUP BY agent`
-    const rows = (
-      nodeFilter
-        ? deps.store.db.prepare(sql).all(since, until, nodeFilter)
-        : deps.store.db.prepare(sql).all(since, until)
-    ) as Array<Record<string, unknown>>
+    const conds = ['u.ts >= ?', 'u.ts <= ?']
+    const params: Array<string | number> = [since, until]
+    appendUsageFilters(conds, params)
+    const sql = `SELECT u.agent, SUM(u.input_tokens+u.output_tokens+u.reasoning_tokens+u.cache_read_tokens+u.cache_write_tokens) t
+                 FROM usage_records u ${usageProjJoin} WHERE ${conds.join(' AND ')} GROUP BY u.agent`
+    const rows = deps.store.db.prepare(sql).all(...params) as Array<Record<string, unknown>>
     for (const r of rows) {
       rangeByAgent.set(String(r.agent), Number(r.t) || 0)
     }
   }
   const sessionOnly = new Map<string, { last: number | null; sessions: number }>()
   {
+    const conds: string[] = []
+    const params: Array<string | number> = []
+    if (nodeFilter) {
+      conds.push('source_node_id = ?')
+      params.push(nodeFilter)
+    }
+    if (projFilter === '__unassigned__') {
+      conds.push("(project_dir IS NULL OR TRIM(project_dir) = '')")
+    } else if (projFilter) {
+      conds.push('project_dir = ?')
+      params.push(projFilter)
+    }
+    const whereClause = conds.length > 0 ? `WHERE ${conds.join(' AND ')}` : ''
     const sql = `SELECT agent, MAX(COALESCE(updated_at, started_at, 0)) last, COUNT(*) s
-                 FROM sessions ${nodeFilter ? 'WHERE source_node_id = ?' : ''} GROUP BY agent`
-    const rows = (
-      nodeFilter ? deps.store.db.prepare(sql).all(nodeFilter) : deps.store.db.prepare(sql).all()
-    ) as Array<Record<string, unknown>>
+                 FROM sessions ${whereClause} GROUP BY agent`
+    const rows = deps.store.db.prepare(sql).all(...params) as Array<Record<string, unknown>>
     for (const r of rows) {
       sessionOnly.set(String(r.agent), {
         last: Number(r.last) || null,
@@ -137,17 +193,29 @@ function buildAgentInfos(
   // 会话数：sessions 表与 usage_records 去重会话的「并集」计数，按 (source_node_id, agent, session_id) 防跨机碰撞
   const sessionUnion = new Map<string, number>()
   {
+    const sConds: string[] = []
+    const sParams: Array<string | number> = []
+    if (nodeFilter) {
+      sConds.push('source_node_id = ?')
+      sParams.push(nodeFilter)
+    }
+    if (projFilter === '__unassigned__') {
+      sConds.push("(project_dir IS NULL OR TRIM(project_dir) = '')")
+    } else if (projFilter) {
+      sConds.push('project_dir = ?')
+      sParams.push(projFilter)
+    }
+    const uConds = ['u.session_id IS NOT NULL']
+    const uParams: Array<string | number> = []
+    appendUsageFilters(uConds, uParams)
+    const sWhere = sConds.length > 0 ? `WHERE ${sConds.join(' AND ')}` : ''
     const sql = `SELECT agent, COUNT(*) c FROM (
-                   SELECT source_node_id, agent, session_id FROM sessions ${nodeFilter ? 'WHERE source_node_id = ?' : ''}
+                   SELECT source_node_id, agent, session_id FROM sessions ${sWhere}
                    UNION
-                   SELECT source_node_id, agent, session_id FROM usage_records
-                   WHERE session_id IS NOT NULL ${nodeFilter ? 'AND source_node_id = ?' : ''}
+                   SELECT u.source_node_id, u.agent, u.session_id FROM usage_records u ${usageProjJoin}
+                   WHERE ${uConds.join(' AND ')}
                  ) GROUP BY agent`
-    const rows = (
-      nodeFilter
-        ? deps.store.db.prepare(sql).all(nodeFilter, nodeFilter)
-        : deps.store.db.prepare(sql).all()
-    ) as Array<Record<string, unknown>>
+    const rows = deps.store.db.prepare(sql).all(...sParams, ...uParams) as Array<Record<string, unknown>>
     for (const r of rows) {
       sessionUnion.set(String(r.agent), Number(r.c) || 0)
     }
@@ -238,7 +306,8 @@ export function registerIpc(deps: IpcDeps): void {
       agent: string | null,
       customStart: unknown,
       customEnd: unknown,
-      nodeId: unknown
+      nodeId: unknown,
+      projectDir: unknown
     ) => {
       const custom =
         typeof customStart === 'number' &&
@@ -250,7 +319,11 @@ export function registerIpc(deps: IpcDeps): void {
           : undefined
       const safeNodeId =
         typeof nodeId === 'string' && nodeId.length > 0 && nodeId.length <= 128 ? nodeId : null
-      return q.getBoard(range, agent, Date.now(), custom, safeNodeId)
+      const safeProjectDir =
+        typeof projectDir === 'string' && projectDir.length > 0 && projectDir.length <= 1024
+          ? projectDir
+          : null
+      return q.getBoard(range, agent, Date.now(), custom, safeNodeId, safeProjectDir)
     }
   )
   // 自定义时间范围持久化（重启保持）
@@ -307,7 +380,14 @@ export function registerIpc(deps: IpcDeps): void {
   )
   ipcMain.handle(
     'nexus:getAgents',
-    (_e, range?: unknown, customStart?: unknown, customEnd?: unknown, nodeId?: unknown) => {
+    (
+      _e,
+      range?: unknown,
+      customStart?: unknown,
+      customEnd?: unknown,
+      nodeId?: unknown,
+      projectDir?: unknown
+    ) => {
       const r: RangeKey =
         range === 'today' ||
         range === 'yesterday' ||
@@ -329,11 +409,33 @@ export function registerIpc(deps: IpcDeps): void {
           : undefined
       const safeNodeId =
         typeof nodeId === 'string' && nodeId.length > 0 && nodeId.length <= 128 ? nodeId : null
-      return buildAgentInfos(deps, r, custom, safeNodeId)
+      const safeProjectDir =
+        typeof projectDir === 'string' && projectDir.length > 0 && projectDir.length <= 1024
+          ? projectDir
+          : null
+      return buildAgentInfos(deps, r, custom, safeNodeId, safeProjectDir)
     }
   )
   ipcMain.handle('nexus:getSessions', (_e, range: RangeKey, agent: string | null, limit: number) =>
     q.getSessions(range, agent, Math.min(Math.max(1, limit), 200))
+  )
+  ipcMain.handle(
+    'nexus:getSessionDetail',
+    (_e, agent: unknown, sessionId: unknown, nodeId?: unknown) => {
+      if (
+        typeof agent !== 'string' ||
+        !agent ||
+        agent.length > 64 ||
+        typeof sessionId !== 'string' ||
+        !sessionId ||
+        sessionId.length > 256
+      ) {
+        return null
+      }
+      const safeNodeId =
+        typeof nodeId === 'string' && nodeId.length > 0 && nodeId.length <= 128 ? nodeId : null
+      return q.getSessionDetail(agent, sessionId, safeNodeId)
+    }
   )
   ipcMain.handle('nexus:getSyncStatus', () => deps.sync.getStatus())
   ipcMain.handle('nexus:syncNow', async () => {
@@ -539,7 +641,28 @@ export function registerIpc(deps: IpcDeps): void {
     return normalized
   })
 
-  ipcMain.handle('nexus:exportBoard', async () => {
+  ipcMain.handle('nexus:getPricingConfig', (): PricingConfig => q.getPricingConfig().config)
+  ipcMain.handle('nexus:setPricingConfig', (_e, raw: unknown): PricingConfig => {
+    const clean = normalizePricingConfig(raw)
+    deps.store.setSetting('pricingConfig', JSON.stringify(clean))
+    q.invalidateBoardCache()
+    deps.onEvaluateAlerts?.()
+    return clean
+  })
+  ipcMain.handle('nexus:getAppPreferences', (): AppPreferences => getAppPreferences(deps.store))
+  ipcMain.handle('nexus:setAppPreferences', (_e, patch: unknown): AppPreferences => {
+    const obj = patch && typeof patch === 'object' ? (patch as Partial<AppPreferences>) : {}
+    const updated = setAppPreferences(deps.store, obj)
+    deps.onEvaluateAlerts?.()
+    return updated
+  })
+
+  const exportBoardImage = async (): Promise<{
+    ok: boolean
+    path?: string
+    canceled?: boolean
+    error?: string
+  }> => {
     const win = deps.getMainWindow()
     if (!win) return { ok: false, error: '窗口不可用' }
     try {
@@ -556,7 +679,111 @@ export function registerIpc(deps: IpcDeps): void {
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
-  })
+  }
+
+  ipcMain.handle('nexus:exportBoard', async () => exportBoardImage())
+
+  ipcMain.handle(
+    'nexus:exportReport',
+    async (_e, format: ExportFormat, rawFilter: ExportFilter | undefined) => {
+      if (format === 'png') return exportBoardImage()
+      const win = deps.getMainWindow()
+      if (!win) return { ok: false, error: '窗口不可用' }
+      try {
+        const f = rawFilter && typeof rawFilter === 'object' ? rawFilter : ({} as ExportFilter)
+        const r: RangeKey =
+          f.range === 'today' ||
+          f.range === 'yesterday' ||
+          f.range === '7d' ||
+          f.range === '30d' ||
+          f.range === 'month' ||
+          f.range === 'year' ||
+          f.range === 'all' ||
+          f.range === 'custom'
+            ? f.range
+            : '7d'
+        const safeAgent =
+          typeof f.agent === 'string' && f.agent.length > 0 && f.agent.length <= 64 ? f.agent : null
+        const safeNodeId =
+          typeof f.nodeId === 'string' && f.nodeId.length > 0 && f.nodeId.length <= 128
+            ? f.nodeId
+            : null
+        const safeProjectDir =
+          typeof f.projectDir === 'string' && f.projectDir.length > 0 && f.projectDir.length <= 1024
+            ? f.projectDir
+            : null
+        const custom =
+          typeof f.customStart === 'number' &&
+          typeof f.customEnd === 'number' &&
+          Number.isFinite(f.customStart) &&
+          Number.isFinite(f.customEnd) &&
+          f.customEnd > f.customStart
+            ? { start: f.customStart, end: f.customEnd }
+            : undefined
+
+        const board = q.getBoard(r, safeAgent, Date.now(), custom, safeNodeId, safeProjectDir)
+        const { config: pricing } = q.getPricingConfig()
+        const localAlias = deps.store.getSetting('meshNodeAlias')
+        const localLabel = localAlias && localAlias.trim() ? localAlias.trim() : os.hostname()
+        let nodeLabel: string | null = null
+        if (safeNodeId) {
+          const localId = deps.store.getSetting('meshNodeId') ?? 'local'
+          if (safeNodeId === 'local' || safeNodeId === localId) {
+            nodeLabel = localLabel
+          } else {
+            const matched = deps.store.listMeshNodeRecords().find((n) => n.nodeId === safeNodeId)
+            nodeLabel = matched ? matched.alias || matched.hostname : safeNodeId
+          }
+        }
+        const matchedAdapter =
+          deps.adapters.find((a) => a.id === safeAgent) ??
+          deps.presence.find((p) => p.id === safeAgent)
+
+        const ctx: ExportContext = {
+          range: r,
+          agentLabel: matchedAdapter ? matchedAdapter.label : safeAgent,
+          nodeLabel,
+          projectDir: safeProjectDir,
+          pricing
+        }
+
+        const dateStr = new Date().toISOString().slice(0, 10)
+        const metaByFormat = {
+          csv: {
+            title: '导出对账数据表格 (CSV)',
+            defaultPath: `nexus-report-${dateStr}.csv`,
+            filters: [{ name: 'CSV 表格', extensions: ['csv'] }],
+            content: () => formatCsvReport(board, ctx)
+          },
+          markdown: {
+            title: '导出账单摘要报告 (Markdown)',
+            defaultPath: `nexus-report-${dateStr}.md`,
+            filters: [{ name: 'Markdown 文档', extensions: ['md'] }],
+            content: () => formatMarkdownReport(board, ctx)
+          },
+          json: {
+            title: '导出原始明细快照 (JSON)',
+            defaultPath: `nexus-snapshot-${dateStr}.json`,
+            filters: [{ name: 'JSON 文件', extensions: ['json'] }],
+            content: () => formatJsonReport(board, ctx)
+          }
+        } as const
+        const spec = format === 'csv' || format === 'markdown' || format === 'json' ? metaByFormat[format] : null
+        if (!spec) return { ok: false, error: '不支持的导出格式' }
+
+        const { canceled, filePath } = await dialog.showSaveDialog(win, {
+          title: spec.title,
+          defaultPath: spec.defaultPath,
+          filters: spec.filters.map((item) => ({ name: item.name, extensions: [...item.extensions] }))
+        })
+        if (canceled || !filePath) return { ok: false, canceled: true }
+        await import('node:fs').then((fs) => fs.promises.writeFile(filePath, spec.content(), 'utf-8'))
+        return { ok: true, path: filePath }
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) }
+      }
+    }
+  )
 
   ipcMain.handle('nexus:openPath', async (_e, path: string) => {
     // 防御纵深（红队 N-09）：路径数据源自外部 Agent 库的不可控字符串，
@@ -590,6 +817,12 @@ export function broadcastMaximizeState(win: BrowserWindow | null, maximized: boo
 export function broadcastMeshStatus(win: BrowserWindow | null, status: MeshStatusInfo): void {
   if (win && !win.isDestroyed()) {
     win.webContents.send('nexus:mesh-update', status)
+  }
+}
+
+export function broadcastAppAlert(win: BrowserWindow | null, alert: AppAlertEvent): void {
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('nexus:app-alert', alert)
   }
 }
 

@@ -20,6 +20,7 @@ export interface Overview {
   range: RangeKey
   agent: string | null
   nodeId?: string | null
+  projectDir?: string | null
   totals: TokenTotals
   sessionCount: number
   toolCallCount: number
@@ -98,6 +99,87 @@ export interface SessionRow {
   sourceNodeLabel?: string
 }
 
+export interface ProjectStat extends NamedStat {
+  projectDir: string | null
+  estimatedCostUsd: number
+}
+
+export interface SessionModelStat {
+  model: string
+  requests: number
+  input: number
+  output: number
+  reasoning: number
+  cacheRead: number
+  cacheWrite: number
+  total: number
+  estimatedCostUsd: number
+}
+
+export interface SessionToolStat {
+  tool: string
+  count: number
+}
+
+export interface SessionDetail {
+  session: SessionRow
+  totals: TokenTotals
+  cacheHitRate: number | null
+  models: SessionModelStat[]
+  tools: SessionToolStat[]
+}
+
+export type ExportFormat = 'png' | 'csv' | 'markdown' | 'json'
+
+export type CurrencyCode = 'USD' | 'CNY'
+
+export type PricingOverrideMode = 'free' | 'multiplier' | 'custom'
+
+export interface PricingOverride {
+  id: string
+  pattern: string
+  mode: PricingOverrideMode
+  multiplier?: number
+  input?: number
+  output?: number
+  cacheRead?: number
+  label?: string
+}
+
+export interface PricingConfig {
+  currency: CurrencyCode
+  cnyRate: number
+  globalMultiplier: number
+  overrides: PricingOverride[]
+}
+
+export interface AppPreferences {
+  closeToTray: boolean
+  budgetDailyUsd: number
+  spikeTokens10m: number
+}
+
+export interface AppAlertEvent {
+  id: string
+  kind: 'budget' | 'spike' | 'quota'
+  title: string
+  body: string
+  ts: number
+}
+
+export const DEFAULT_PRICING_CONFIG: PricingConfig = {
+  currency: 'USD',
+  cnyRate: 7.2,
+  globalMultiplier: 1,
+  overrides: []
+}
+
+export const DEFAULT_APP_PREFERENCES: AppPreferences = {
+  closeToTray: true,
+  budgetDailyUsd: 0,
+  spikeTokens10m: 0
+}
+
 /** 看板全量数据（单遍扫描聚合，一次 IPC 代替 9 次独立查询） */
 export interface BoardData {
   overview: Overview
@@ -105,6 +187,7 @@ export interface BoardData {
   trendByAgent: TrendPoint[]
   byAgent: NamedStat[]
   byModel: NamedStat[]
+  byProject: ProjectStat[]
   breakdown: TokenTypeStat[]
   heatmap: HeatmapData
   tools: ToolStat[]
@@ -230,6 +313,15 @@ export interface TimeRange {
   bucket: 'hour' | 'day'
 }
 
+export interface ExportFilter {
+  range: RangeKey
+  agent: string | null
+  customStart?: number
+  customEnd?: number
+  nodeId?: string | null
+  projectDir?: string | null
+}
+
 // ── IPC 契约（renderer 经 window.nexus 调用）──
 export interface NexusApi {
   getOverview(range: RangeKey, agent: string | null): Promise<Overview>
@@ -238,7 +330,8 @@ export interface NexusApi {
     agent: string | null,
     customStart?: number,
     customEnd?: number,
-    nodeId?: string | null
+    nodeId?: string | null,
+    projectDir?: string | null
   ): Promise<import('./types').BoardData>
   getCustomRange(): Promise<{ start: number; end: number } | null>
   setCustomRange(start: number, end: number): Promise<{ start: number; end: number }>
@@ -258,9 +351,15 @@ export interface NexusApi {
     range?: RangeKey,
     customStart?: number,
     customEnd?: number,
-    nodeId?: string | null
+    nodeId?: string | null,
+    projectDir?: string | null
   ): Promise<AgentInfo[]>
   getSessions(range: RangeKey, agent: string | null, limit: number): Promise<SessionRow[]>
+  getSessionDetail(
+    agent: string,
+    sessionId: string,
+    nodeId?: string | null
+  ): Promise<SessionDetail | null>
   // Nexus Mesh（跨设备算力组网）
   getMeshStatus(): Promise<MeshStatusInfo>
   setLocalNodeAlias(alias: string | null): Promise<MeshStatusInfo>
@@ -306,7 +405,16 @@ export interface NexusApi {
   getQuotaAlertThreshold(): Promise<number>
   setQuotaAlertThreshold(percent: number): Promise<number>
   onQuotaUpdate(cb: (views: import('./quotas').AccountQuotaView[]) => void): () => void
+  getPricingConfig(): Promise<PricingConfig>
+  setPricingConfig(config: PricingConfig): Promise<PricingConfig>
+  getAppPreferences(): Promise<AppPreferences>
+  setAppPreferences(prefs: Partial<AppPreferences>): Promise<AppPreferences>
+  onAppAlert(cb: (alert: AppAlertEvent) => void): () => void
   exportBoard(): Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>
+  exportReport(
+    format: ExportFormat,
+    filter: ExportFilter
+  ): Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>
   openPath(path: string): Promise<void>
   onSyncProgress(cb: (p: SyncProgress) => void): () => void
 }

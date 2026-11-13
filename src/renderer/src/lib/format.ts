@@ -1,6 +1,15 @@
 // 数字/时间格式化。语言相关的量级与相对时间走 i18n（t() 纯函数，非组件可用）。
 
+import type { CurrencyCode, PricingConfig } from '@shared/types'
 import { getLang, t } from '../i18n'
+
+let activeCurrency: CurrencyCode = 'USD'
+let activeCnyRate = 7.2
+
+export function setPricingDisplay(cfg: Pick<PricingConfig, 'currency' | 'cnyRate'>): void {
+  activeCurrency = cfg.currency === 'CNY' ? 'CNY' : 'USD'
+  activeCnyRate = Number.isFinite(cfg.cnyRate) && cfg.cnyRate > 0 ? cfg.cnyRate : 7.2
+}
 
 export function compactNumber(n: number): string {
   const abs = Math.abs(n)
@@ -29,11 +38,29 @@ export function fullNumber(n: number): string {
   return n.toLocaleString('en-US')
 }
 
-export function formatCost(usd: number): string {
-  if (usd <= 0) return '$0'
-  if (usd < 0.01) return `$${usd.toFixed(4)}`
-  if (usd < 1000) return `$${usd.toFixed(2)}`
-  return `$${Math.round(usd).toLocaleString('en-US')}`
+export function formatCost(
+  usd: number,
+  cfg?: Pick<PricingConfig, 'currency' | 'cnyRate'>
+): string {
+  const currency = cfg?.currency ?? activeCurrency
+  const rate = cfg?.cnyRate ?? activeCnyRate
+  const symbol = currency === 'CNY' ? '¥' : '$'
+  const amount = currency === 'CNY' ? usd * rate : usd
+  if (amount <= 0) return `${symbol}0`
+  if (amount < 0.01) return `${symbol}${amount.toFixed(4)}`
+  if (amount < 1000) return `${symbol}${amount.toFixed(2)}`
+  return `${symbol}${Math.round(amount).toLocaleString('en-US')}`
+}
+
+export function formatCostPrecise(
+  usd: number,
+  cfg?: Pick<PricingConfig, 'currency' | 'cnyRate'>
+): string {
+  const currency = cfg?.currency ?? activeCurrency
+  const rate = cfg?.cnyRate ?? activeCnyRate
+  const symbol = currency === 'CNY' ? '¥' : '$'
+  const amount = currency === 'CNY' ? usd * rate : usd
+  return `${symbol}${amount.toFixed(4)}`
 }
 
 export function formatTime(ms: number | null, todayLabel = true): string {

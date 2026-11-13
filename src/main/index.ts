@@ -1,12 +1,23 @@
 // Nexus 主进程入口：创建窗口、装配各模块（依赖注入）、启动同步循环。
 
-import { app, BrowserWindow, nativeTheme, Notification, powerSaveBlocker } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  Menu,
+  nativeImage,
+  nativeTheme,
+  Notification,
+  powerSaveBlocker,
+  Tray
+} from 'electron'
 import { randomBytes } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { NexusStore } from './modules/aggregator/infrastructure/store'
 import { createAdapters, PRESENCE_ONLY_AGENTS } from './modules/adapter/application/registry'
 import { SyncService } from './modules/aggregator/application/sync-service'
 import { QueryService } from './modules/aggregator/application/query-service'
+import { UsageAlertMonitor, getAppPreferences } from './modules/alerts/monitor'
 import { SystemCollector } from './modules/system/collector'
 import { ZcodeManager } from './modules/zcode/manager'
 import { DshBridge } from './modules/dsh/bridge'
@@ -27,7 +38,8 @@ import {
   registerIpc,
   broadcastSyncProgress,
   broadcastMaximizeState,
-  broadcastMeshStatus
+  broadcastMeshStatus,
+  broadcastAppAlert
 } from './ipc/register'
 
 let mainWindow: BrowserWindow | null = null
@@ -35,6 +47,10 @@ let store: NexusStore | null = null
 let sync: SyncService | null = null
 let meshClient: MeshClient | null = null
 let remoteServer: RemoteServer | null = null
+let tray: Tray | null = null
+let isQuitting = false
+let closeToTrayCheck: (() => boolean) | null = null
+let onTrayStateRefresh: (() => void) | null = null
 
 /**
  * 一次性迁移（蓝队 F4）：旧版 codex 适配器用畸形文件名回退 id 落库，
@@ -90,6 +106,15 @@ function createWindow(): void {
   mainWindow.on('maximize', () => broadcastMaximizeState(mainWindow, true))
   mainWindow.on('unmaximize', () => broadcastMaximizeState(mainWindow, false))
   mainWindow.once('ready-to-show', () => mainWindow?.show())
+  mainWindow.on('show', () => onTrayStateRefresh?.())
+  mainWindow.on('hide', () => onTrayStateRefresh?.())
+  mainWindow.on('close', (e) => {
+    if (!isQuitting && !process.env.NEXUS_CAPTURE && tray && closeToTrayCheck?.()) {
+      e.preventDefault()
+      mainWindow?.hide()
+      onTrayStateRefresh?.()
+    }
+  })
   mainWindow.on('closed', () => {
     mainWindow = null
   })
@@ -219,11 +244,15 @@ app.whenReady()
   const query = new QueryService(store, () => identity.nodeId)
   const getActiveAgents = (): string[] => adapters.filter((a) => a.detect()).map((a) => a.id)
 
+  let alertMonitor: UsageAlertMonitor | null = null
+
   // 看板缓存：sync 有新数据即失效；随后 3s 错峰预热常用范围（7天+全部），
   // 让用户切范围基本命中内存（0ms）。预热本身 ~0.7s，撞上用户点击的概率 <2%。
   let boardWarmer: NodeJS.Timeout | null = null
   const onSyncDone = (): void => {
     query.invalidateBoardCache()
+    alertMonitor?.evaluate()
+    onTrayStateRefresh?.()
     if (meshClient && meshClient.loadConfig() && identity.getEffectiveRole() === 'spoke') {
       void meshClient.syncDelta().catch(() => undefined)
     }
@@ -263,6 +292,13 @@ app.whenReady()
       // 通知失败不影响主流程
     }
     remote.broadcastPush('alert', alert)
+    broadcastAppAlert(mainWindow, {
+      id: `quota-${Date.now()}`,
+      kind: 'quota',
+      title: alert.title,
+      body: alert.body,
+      ts: Date.now()
+    })
   })
   quota.registerIntegrations(PLATFORM_INTEGRATIONS)
   // 账号级每日真实消耗（官方账单）落 Nexus 库
@@ -358,6 +394,95 @@ app.whenReady()
   )
   remoteServer = remote
   meshClient = new MeshClient(store, identity, system, getActiveAgents, triggerMeshChanged)
+  alertMonitor = new UsageAlertMonitor(store, query, (event) => {
+    try {
+      new Notification({ title: event.title, body: event.body }).show()
+    } catch {
+      // 通知失败不影响主流程
+    }
+    remote.broadcastPush('alert', event)
+    broadcastAppAlert(mainWindow, event)
+  })
+  closeToTrayCheck = () => (store ? getAppPreferences(store).closeToTray : true)
+
+  const formatCompactTokens = (n: number): string => {
+    if (n >= 1e8) return `${(n / 1e8).toFixed(1)}亿`
+    if (n >= 1e4) return `${(n / 1e4).toFixed(1)}万`
+    return String(Math.round(n))
+  }
+
+  let latestMeshOnline: { online: number; total: number } | null = null
+  const refreshTray = (): void => {
+    if (!tray) return
+    try {
+      const todayTokens = query.getOverview('today', null).totals.total
+      const meshSuffix =
+        latestMeshOnline && latestMeshOnline.total > 1
+          ? ` · ${latestMeshOnline.online}/${latestMeshOnline.total} 节点在线`
+          : ''
+      tray.setToolTip(`Nexus · 今日 ${formatCompactTokens(todayTokens)} tk${meshSuffix}`)
+      const visible = Boolean(mainWindow && mainWindow.isVisible())
+      const menu = Menu.buildFromTemplate([
+        {
+          label: visible ? '隐藏到系统托盘' : '显示主界面',
+          click: () => {
+            if (!mainWindow) {
+              createWindow()
+              return
+            }
+            if (mainWindow.isVisible()) {
+              mainWindow.hide()
+            } else {
+              if (mainWindow.isMinimized()) mainWindow.restore()
+              mainWindow.show()
+              mainWindow.focus()
+            }
+            refreshTray()
+          }
+        },
+        {
+          label: '立即同步用量',
+          click: () => {
+            void sync?.syncNow()
+          }
+        },
+        { type: 'separator' },
+        {
+          label: '退出 Nexus',
+          click: () => {
+            isQuitting = true
+            app.quit()
+          }
+        }
+      ])
+      tray.setContextMenu(menu)
+    } catch {
+      // 托盘刷新异常不影响主循环
+    }
+  }
+  onTrayStateRefresh = refreshTray
+
+  if (!process.env.NEXUS_CAPTURE) {
+    try {
+      const iconPath = join(app.getAppPath(), 'build/icon.ico')
+      const iconImg = existsSync(iconPath) ? nativeImage.createFromPath(iconPath) : nativeImage.createEmpty()
+      tray = new Tray(iconImg)
+      tray.on('click', () => {
+        if (!mainWindow) {
+          createWindow()
+          return
+        }
+        if (mainWindow.isMinimized()) mainWindow.restore()
+        mainWindow.show()
+        mainWindow.focus()
+        refreshTray()
+      })
+      refreshTray()
+    } catch {
+      tray = null
+    }
+  }
+
   meshService = new MeshService({
     store,
     identity,
@@ -365,8 +490,19 @@ app.whenReady()
     remote,
     client: meshClient,
     getActiveAgents,
-    onInvalidateBoard: () => query.invalidateBoardCache(),
-    onStatusChanged: (st) => broadcastMeshStatus(mainWindow, st)
+    onInvalidateBoard: () => {
+      query.invalidateBoardCache()
+      alertMonitor?.evaluate()
+      refreshTray()
+    },
+    onStatusChanged: (st) => {
+      latestMeshOnline = {
+        online: st.nodes.filter((n) => n.status === 'online').length,
+        total: st.nodes.length
+      }
+      refreshTray()
+      broadcastMeshStatus(mainWindow, st)
+    }
   })
 
   registerIpc({
@@ -382,7 +518,8 @@ app.whenReady()
     quota,
     remote,
     mesh: meshService,
-    getMainWindow: () => mainWindow
+    getMainWindow: () => mainWindow,
+    onEvaluateAlerts: () => alertMonitor?.evaluate()
   })
 
   quota.startPolling()
@@ -427,6 +564,13 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  isQuitting = true
+  try {
+    tray?.destroy()
+    tray = null
+  } catch {
+    // 忽略托盘销毁异常
+  }
   meshClient?.stop()
   remoteServer?.stop()
   sync?.dispose()

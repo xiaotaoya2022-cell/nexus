@@ -10,6 +10,7 @@ import { relativeTime } from '@renderer/lib/format'
 import { AnimatedNumber } from './RollingNumber'
 import { VendorBadge } from './VendorBadge'
 import { AgentLogo } from './AgentLogo'
+import { useDeltaFlashIds } from './MotionEffects'
 import { AutoListHighlight, SlidingTabIndicator } from './SmoothHighlight'
 import { StatusDot, statusText } from './ui'
 import { t, useLang } from '../i18n'
@@ -37,6 +38,14 @@ export function AgentSidebar({
   useLang() // 语言切换时重渲染侧栏
   const agent = useUi((s) => s.agent)
   const setAgent = useUi((s) => s.setAgent)
+  const range = useUi((s) => s.range)
+  const selectedNodeId = useUi((s) => s.selectedNodeId)
+  const flashingAgents = useDeltaFlashIds(
+    agents,
+    (a) => a.id,
+    (a) => a.rangeTokens ?? a.todayTokens,
+    `${range}:${selectedNodeId ?? 'all'}`
+  )
   const [view, setView] = useState<SidebarView>(loadView)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
 
@@ -97,7 +106,9 @@ export function AgentSidebar({
         title={`${a.label} · ${statusText(a.status)}`}
         className={`group flex w-full cursor-pointer items-center gap-2 rounded-lg pr-1 py-1 transition-colors duration-150 ${
           indent ? 'pl-5' : 'pl-2.5'
-        } ${active ? 'bg-selected nx-nav-active' : 'hover:bg-surface-hover'}`}
+        } ${active ? 'bg-selected nx-nav-active' : 'hover:bg-surface-hover'} ${
+          flashingAgents.has(a.id) ? 'nx-delta-flash' : ''
+        }`}
       >
         <StatusDot status={a.status} />
         <AgentLogo agentId={a.id} vendor={vendorOf(a.id)} />
