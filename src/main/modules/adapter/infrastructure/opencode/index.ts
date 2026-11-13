@@ -14,7 +14,7 @@ import type {
   SyncResult,
   StoreWriter
 } from '@main/modules/adapter/domain/types'
-import { openReadonlyDb, tableColumns } from '../util'
+import { openReadonlyDb, sqliteFileStamp, tableColumns } from '../util'
 
 const DB_PATH = join(homedir(), '.local', 'share', 'opencode', 'opencode.db')
 
@@ -56,6 +56,10 @@ export class OpencodeAdapter implements AgentAdapter {
 
   async sync(ctx: SyncContext): Promise<SyncResult> {
     if (!this.detect()) {
+      return { records: 0, sessions: 0, tools: 0, lastTs: ctx.state.lastTs, meta: ctx.state.meta }
+    }
+    const dbStamp = sqliteFileStamp(this.dbPath)
+    if (dbStamp && ctx.state.meta.dbStamp === dbStamp) {
       return { records: 0, sessions: 0, tools: 0, lastTs: ctx.state.lastTs, meta: ctx.state.meta }
     }
     let db
@@ -190,7 +194,7 @@ export class OpencodeAdapter implements AgentAdapter {
         sessions,
         tools,
         lastTs: ctx.now,
-        meta: { ...ctx.state.meta, lastToolTime }
+        meta: { ...ctx.state.meta, lastToolTime, ...(dbStamp ? { dbStamp } : {}) }
       }
     } finally {
       db.close()

@@ -38,6 +38,10 @@ const api: NexusApi = {
       ipcRenderer.removeListener('nexus:maximize-changed', listener)
     }
   },
+  startWindowDrag: (ratioX?: number, clientY?: number) =>
+    ipcRenderer.send('nexus:window-drag-start', ratioX, clientY),
+  moveWindowDrag: () => ipcRenderer.send('nexus:window-drag-move'),
+  endWindowDrag: () => ipcRenderer.send('nexus:window-drag-end'),
   getTrend: (range, agent, groupBy) => ipcRenderer.invoke('nexus:getTrend', range, agent, groupBy),
   getByAgent: (range) => ipcRenderer.invoke('nexus:getByAgent', range),
   getByModel: (range, agent) => ipcRenderer.invoke('nexus:getByModel', range, agent),

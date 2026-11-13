@@ -14,15 +14,17 @@ import type {
   StoreWriter
 } from '@main/modules/adapter/domain/types'
 import {
-  collectFiles,
+  collectFilesAsync,
   openReadonlyDb,
   parseTimestampMs,
   readJsonlOrZstdLines,
+  sqliteFileStamp,
   tableExists
 } from '../util'
 
 interface QoderMeta {
   fileStamps?: Record<string, string>
+  sqliteStamps?: Record<string, string>
 }
 
 interface QoderSessionAcc {
@@ -70,6 +72,7 @@ export class QoderAdapter implements AgentAdapter {
     }
     const meta = (ctx.state.meta as Partial<QoderMeta> | undefined) ?? {}
     const fileStamps: Record<string, string> = { ...(meta.fileStamps ?? {}) }
+    const sqliteStamps: Record<string, string> = { ...(meta.sqliteStamps ?? {}) }
 
     const result: SyncResult = {
       records: 0,
@@ -82,7 +85,7 @@ export class QoderAdapter implements AgentAdapter {
     const files: string[] = []
     for (const root of this.projectRoots) {
       if (existsSync(root)) {
-        for (const f of collectFiles(root, '.jsonl', 4)) {
+        for (const f of await collectFilesAsync(root, '.jsonl', 4)) {
           if (!f.endsWith('-exec.jsonl')) files.push(f)
         }
       }
@@ -277,7 +280,8 @@ export class QoderAdapter implements AgentAdapter {
 
     // 补充读取 main.sqlite 的 chat_sessions 表（完整会话标题与时间）
     for (const dbPath of this.sqlitePaths) {
-      if (!existsSync(dbPath)) continue
+      const dbStamp = sqliteFileStamp(dbPath)
+      if (!dbStamp || sqliteStamps[dbPath] === dbStamp) continue
       try {
         const db = openReadonlyDb(dbPath)
         try {
@@ -311,6 +315,7 @@ export class QoderAdapter implements AgentAdapter {
               })
             }
           }
+          sqliteStamps[dbPath] = dbStamp
         } finally {
           db.close()
         }
@@ -334,7 +339,7 @@ export class QoderAdapter implements AgentAdapter {
         }))
       )
     }
-    result.meta = { fileStamps }
+    result.meta = { fileStamps, sqliteStamps }
     return result
   }
 }

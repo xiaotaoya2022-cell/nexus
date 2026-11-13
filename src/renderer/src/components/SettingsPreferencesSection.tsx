@@ -14,6 +14,7 @@ import { t, useLang } from '../i18n'
 import { nexus } from '../lib/api'
 import { useUi } from '../store'
 import { SlidingTabIndicator } from './SmoothHighlight'
+import { NexusSelect } from './ui'
 
 export function SettingsPreferencesSection({
   onToast
@@ -290,24 +291,26 @@ export function SettingsPreferencesSection({
                 </button>
               </div>
               <div className="flex items-center gap-1.5">
-                <select
-                  value={rule.mode}
-                  onChange={(e) => {
-                    const mode = e.target.value as PricingOverrideMode
-                    updateOverride(rule.id, {
-                      mode,
-                      multiplier: mode === 'multiplier' ? (rule.multiplier ?? 0.5) : undefined,
-                      input: mode === 'custom' ? (rule.input ?? 1) : undefined,
-                      output: mode === 'custom' ? (rule.output ?? 3) : undefined,
-                      cacheRead: mode === 'custom' ? (rule.cacheRead ?? 0.1) : undefined
-                    })
-                  }}
-                  className="h-6 rounded border border-border bg-card px-1.5 text-[11px] text-foreground"
-                >
-                  <option value="free">{t('settings.pricing.modeFree')}</option>
-                  <option value="multiplier">{t('settings.pricing.modeMult')}</option>
-                  <option value="custom">{t('settings.pricing.modeCustom')}</option>
-                </select>
+                <div className="min-w-[116px]">
+                  <NexusSelect
+                    value={rule.mode}
+                    onChange={(mode: PricingOverrideMode) => {
+                      updateOverride(rule.id, {
+                        mode,
+                        multiplier: mode === 'multiplier' ? (rule.multiplier ?? 0.5) : undefined,
+                        input: mode === 'custom' ? (rule.input ?? 1) : undefined,
+                        output: mode === 'custom' ? (rule.output ?? 3) : undefined,
+                        cacheRead: mode === 'custom' ? (rule.cacheRead ?? 0.1) : undefined
+                      })
+                    }}
+                    className="h-6 w-full text-[11px]"
+                    options={[
+                      { value: 'free', label: t('settings.pricing.modeFree') },
+                      { value: 'multiplier', label: t('settings.pricing.modeMult') },
+                      { value: 'custom', label: t('settings.pricing.modeCustom') }
+                    ]}
+                  />
+                </div>
                 {rule.mode === 'multiplier' && (
                   <input
                     type="number"

@@ -13,7 +13,7 @@ import type {
   SyncResult,
   StoreWriter
 } from '@main/modules/adapter/domain/types'
-import { openReadonlyDb, tableColumns } from '../util'
+import { openReadonlyDb, sqliteFileStamp, tableColumns, yieldToEventLoop } from '../util'
 import type { DatabaseSync } from 'node:sqlite'
 
 const CHUNK = 5000
@@ -40,6 +40,10 @@ export class ZCodeAdapter implements AgentAdapter {
   }
 
   async sync(ctx: SyncContext): Promise<SyncResult> {
+    const dbStamp = sqliteFileStamp(this.dbPath)
+    if (dbStamp && ctx.state.meta.dbStamp === dbStamp) {
+      return { records: 0, sessions: 0, tools: 0, lastTs: ctx.state.lastTs, meta: ctx.state.meta }
+    }
     const db = openReadonlyDb(this.dbPath)
     try {
       const result: SyncResult = {
@@ -52,6 +56,7 @@ export class ZCodeAdapter implements AgentAdapter {
       await this.syncUsage(db, ctx, result)
       await this.syncSessions(db, ctx, result)
       await this.syncTools(db, ctx, result)
+      if (dbStamp) result.meta = { ...result.meta, dbStamp }
       return result
     } finally {
       db.close()
@@ -107,6 +112,7 @@ export class ZCodeAdapter implements AgentAdapter {
       cursorId = batchId
       result.lastTs = Math.max(result.lastTs, batchTs)
       if (rows.length < CHUNK) break
+      await yieldToEventLoop()
     }
   }
 
@@ -197,6 +203,7 @@ export class ZCodeAdapter implements AgentAdapter {
       cursorTs = batchTs
       cursorId = batchId
       if (rows.length < 5000) break
+      await yieldToEventLoop()
     }
     meta.toolLastTs = Math.max(toolLastTs, cursorTs)
     result.meta = meta

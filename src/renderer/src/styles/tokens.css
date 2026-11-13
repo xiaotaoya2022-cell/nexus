@@ -365,15 +365,8 @@ body {
   }
 }
 
-/* 无边框窗口：顶栏为拖动区（inline -webkit-app-region: drag），
-   交互元素一律恢复可点击——CSS 兜底，防止内联样式遗漏导致按钮点不动 */
-header button,
-header select,
-header input,
-header a,
-header [role='button'] {
-  -webkit-app-region: no-drag;
-}
+/* 无边框窗口改由 header 内 JS/IPC 拖动处理，不再使用 -webkit-app-region: drag，
+   避免 Win32 HTCAPTION 强制还原系统箭头并阻断自定义鼠标指针事件。 */
 
 /* ── Nexus Studio 材质高光与微景深（仅 .style-nexus 生效，.style-classic 保持零样式侵入）── */
 .style-nexus.theme-dark .nx-shell-bg {
@@ -585,17 +578,29 @@ header [role='button'] {
   bottom: -2.5px;
 }
 
-.nx-cursor-host {
-  cursor: none;
-}
-
-.nx-cursor-host :is(input, textarea, select, button, a):hover {
-  cursor: auto;
+/* 使用 1×1 alpha=1 极微可见像素 PNG 替代 cursor: none，保持 Win32 CURSOR_SHOWING=1 且 hCursor!=NULL，
+   防止远控软件（如 UU 远控/GameViewer/Parsec）误判为 FPS 锁鼠标模式并强制回中对抗；同时覆盖伪元素与滚动条。 */
+.nx-cursor-host,
+.nx-cursor-host *,
+.nx-cursor-host *::before,
+.nx-cursor-host *::after {
+  cursor: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNoaGhgBAAEhgGCm2g9SgAAAABJRU5ErkJggg==") 0 0, default !important;
 }
 
 html.nx-cursor-global-host,
-html.nx-cursor-global-host * {
-  cursor: none !important;
+html.nx-cursor-global-host *,
+html.nx-cursor-global-host *::before,
+html.nx-cursor-global-host *::after,
+html.nx-cursor-global-host ::-webkit-scrollbar,
+html.nx-cursor-global-host ::-webkit-scrollbar-track,
+html.nx-cursor-global-host ::-webkit-scrollbar-thumb,
+html.nx-cursor-global-host ::-webkit-scrollbar-button,
+html.nx-cursor-global-host ::-webkit-scrollbar-corner,
+html.nx-cursor-global-host input::-webkit-calendar-picker-indicator,
+html.nx-cursor-global-host input::-webkit-inner-spin-button,
+html.nx-cursor-global-host input::-webkit-clear-button,
+html.nx-cursor-global-host input::-webkit-search-cancel-button {
+  cursor: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNoaGhgBAAEhgGCm2g9SgAAAABJRU5ErkJggg==") 0 0, default !important;
 }
 
 /* ── 4 大高阶动效原语：Spotlight 鼠标聚光灯 / Border Beam 边缘流光 / Scroll Reveal / Marquee ── */

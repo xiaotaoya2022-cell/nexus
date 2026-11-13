@@ -51,7 +51,7 @@ export function WindowControls(): JSX.Element {
   }, [])
 
   return (
-    <div className="flex shrink-0 items-stretch" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+    <div className="flex shrink-0 items-stretch" data-no-drag="">
       <button
         type="button"
         title={t('win.minimize')}

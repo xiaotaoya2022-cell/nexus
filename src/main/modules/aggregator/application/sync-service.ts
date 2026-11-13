@@ -4,6 +4,7 @@
 import type { AgentAdapter } from '@main/modules/adapter/domain/types'
 import type { SyncProgress } from '@shared/types'
 import type { NexusStore } from '../infrastructure/store'
+import { yieldToEventLoop } from '@main/modules/adapter/infrastructure/util'
 import { logger } from '@main/modules/shared/logger'
 
 const SYNC_INTERVAL_MS = 60_000
@@ -81,6 +82,7 @@ export class SyncService {
         started.results.push({ agent: adapter.id, records: 0, sessions: 0, tools: 0, error: message })
         logger.error('adapter.failed', { agent: adapter.id, error: message })
       }
+      await yieldToEventLoop()
     }
 
     // DSH 本地 zstd 会话由 DshAdapter 统一增量同步（usage/sessions/tools 三表）

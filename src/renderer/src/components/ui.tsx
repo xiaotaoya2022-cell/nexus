@@ -1,8 +1,9 @@
 // 基础 UI 组件：状态灯、KPI 卡、图表卡、药丸切换器、空状态、图标。
 // 样式遵循《Nexus UI 设计规范草案》§4。
 
-import type { ReactNode } from 'react'
-import type { JSX } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type { CSSProperties, JSX, KeyboardEvent, ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import type { AgentStatus, RangeKey } from '@shared/types'
 import { t, useLang } from '../i18n'
 import { BorderBeam } from './MotionEffects'
@@ -175,7 +176,7 @@ export function IconButton({
   onClick: () => void
   children: ReactNode
   spinning?: boolean
-  style?: React.CSSProperties
+  style?: CSSProperties
 }): JSX.Element {
   return (
     <button
@@ -187,6 +188,181 @@ export function IconButton({
     >
       <span className={spinning ? 'nx-spin' : undefined}>{children}</span>
     </button>
+  )
+}
+
+export interface NexusSelectOption<T extends string | number> {
+  value: T
+  label: string
+}
+
+/** 站内 DOM 下拉选择器（替代原生 <select>，杜绝 OS 弹窗偷焦点与系统光标闪烁） */
+export function NexusSelect<T extends string | number>({
+  value,
+  options,
+  onChange,
+  ariaLabel,
+  className = 'h-7 w-full text-ui-base'
+}: {
+  value: T
+  options: NexusSelectOption<T>[]
+  onChange: (value: T) => void
+  ariaLabel?: string
+  className?: string
+}): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const [menuPos, setMenuPos] = useState<{ left: number; top?: number; bottom?: number; width: number }>({
+    left: 0,
+    top: 0,
+    width: 120
+  })
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  const currentLabel = options.find((o) => o.value === value)?.label ?? String(value)
+
+  const reposition = (): void => {
+    const el = triggerRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const estimatedH = Math.min(options.length * 30 + 10, 220)
+    const spaceBelow = window.innerHeight - rect.bottom - 8
+    const openUp = spaceBelow < estimatedH && rect.top > spaceBelow
+    const width = Math.max(rect.width, 96)
+    const left = Math.min(Math.max(8, rect.left), window.innerWidth - width - 8)
+    setMenuPos(
+      openUp
+        ? { left, bottom: window.innerHeight - rect.top + 4, width }
+        : { left, top: rect.bottom + 4, width }
+    )
+  }
+
+  useEffect(() => {
+    if (!open) return
+    const onPointerDown = (e: PointerEvent): void => {
+      const target = e.target as Node | null
+      if (triggerRef.current?.contains(target) || menuRef.current?.contains(target)) return
+      setOpen(false)
+    }
+    const onScroll = (e: Event): void => {
+      const target = e.target as Node | null
+      if (menuRef.current && target && menuRef.current.contains(target)) return
+      setOpen(false)
+    }
+    const onKey = (e: globalThis.KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        e.stopPropagation()
+        setOpen(false)
+        triggerRef.current?.focus()
+      }
+    }
+    const onResize = (): void => setOpen(false)
+    document.addEventListener('pointerdown', onPointerDown, true)
+    window.addEventListener('scroll', onScroll, true)
+    window.addEventListener('resize', onResize)
+    window.addEventListener('keydown', onKey, true)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true)
+      window.removeEventListener('scroll', onScroll, true)
+      window.removeEventListener('resize', onResize)
+      window.removeEventListener('keydown', onKey, true)
+    }
+  }, [open])
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLButtonElement>): void => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      if (!open) {
+        reposition()
+        setOpen(true)
+        return
+      }
+      const idx = options.findIndex((o) => o.value === value)
+      if (e.key === 'ArrowDown') {
+        onChange(options[(idx + 1) % options.length].value)
+      } else if (e.key === 'ArrowUp') {
+        onChange(options[(idx - 1 + options.length) % options.length].value)
+      } else {
+        setOpen(false)
+      }
+    }
+  }
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        role="combobox"
+        aria-label={ariaLabel}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        onClick={() => {
+          if (!open) reposition()
+          setOpen((v) => !v)
+        }}
+        onKeyDown={handleKeyDown}
+        className={`flex cursor-pointer items-center justify-between gap-2 rounded-lg border border-border bg-card px-2 text-left text-foreground transition-colors hover:border-border-hover ${className}`}
+      >
+        <span className="min-w-0 truncate">{currentLabel}</span>
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 12 12"
+          fill="none"
+          aria-hidden
+          className={`shrink-0 text-foreground-subtlest transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
+        >
+          <path d="M3 4.5 6 7.5l3-3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            ref={menuRef}
+            role="listbox"
+            data-no-drag=""
+            style={{
+              position: 'fixed',
+              left: `${menuPos.left}px`,
+              top: menuPos.top !== undefined ? `${menuPos.top}px` : undefined,
+              bottom: menuPos.bottom !== undefined ? `${menuPos.bottom}px` : undefined,
+              width: `${menuPos.width}px`,
+              zIndex: 140
+            }}
+            className="nx-fade-in nx-card-elevated max-h-56 overflow-y-auto rounded-lg border border-border bg-card p-1 shadow-xl"
+          >
+            {options.map((opt) => {
+              const selected = opt.value === value
+              return (
+                <button
+                  key={String(opt.value)}
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  onClick={() => {
+                    onChange(opt.value)
+                    setOpen(false)
+                    triggerRef.current?.focus()
+                  }}
+                  className={`flex w-full cursor-pointer items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-ui-xs transition-colors ${
+                    selected
+                      ? 'bg-selected font-medium text-foreground'
+                      : 'text-foreground-subtle hover:bg-hover hover:text-foreground'
+                  }`}
+                >
+                  <span className="truncate">{opt.label}</span>
+                  {selected && (
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-signal" />
+                  )}
+                </button>
+              )
+            })}
+          </div>,
+          document.body
+        )}
+    </>
   )
 }
 

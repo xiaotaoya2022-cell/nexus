@@ -9,7 +9,8 @@
 //    conversationId 与 history 目录名一致，JOIN 补全标题。
 // 3) 请求级无模型名（index.json 不含 model），模型维度标注 unknown。
 
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
+import { readdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type {
@@ -18,7 +19,7 @@ import type {
   SyncResult,
   StoreWriter
 } from '@main/modules/adapter/domain/types'
-import { openReadonlyDb, tableExists } from '../util'
+import { openReadonlyDb, pathExistsAsync, sqliteFileStamp, statFilesAsync, tableExists } from '../util'
 
 const APPDATA = process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming')
 const LOCALAPPDATA = process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local')
@@ -64,28 +65,34 @@ function stampsFrom(meta: Record<string, unknown>): Map<string, FileStamp> {
 }
 
 /** 枚举会话级 index.json：Data/<uid>/<IDE>/<uid>/history/<wsHash>/<convId>/index.json */
-function enumerateHistory(): string[] {
-  if (!existsSync(EXT_DATA)) return []
+async function enumerateHistory(): Promise<string[]> {
+  if (!(await pathExistsAsync(EXT_DATA))) return []
   const out: string[] = []
-  for (const uid of readdirSync(EXT_DATA)) {
+  let uids: string[] = []
+  try {
+    uids = await readdir(EXT_DATA)
+  } catch {
+    return out
+  }
+  for (const uid of uids) {
     const uidDir = join(EXT_DATA, uid)
     let ides: string[] = []
     try {
-      ides = readdirSync(uidDir)
+      ides = await readdir(uidDir)
     } catch {
       continue
     }
     for (const ide of ides) {
       const inner = join(uidDir, ide, uid)
       let hist = join(inner, 'history')
-      if (!existsSync(hist)) {
+      if (!(await pathExistsAsync(hist))) {
         // 兜底：个别版本无内层 uid 目录
         hist = join(uidDir, ide, 'history')
-        if (!existsSync(hist)) continue
+        if (!(await pathExistsAsync(hist))) continue
       }
       let wsList: string[] = []
       try {
-        wsList = readdirSync(hist)
+        wsList = await readdir(hist)
       } catch {
         continue
       }
@@ -93,13 +100,14 @@ function enumerateHistory(): string[] {
         const wsDir = join(hist, ws)
         let convs: string[] = []
         try {
-          convs = readdirSync(wsDir)
+          convs = await readdir(wsDir)
         } catch {
           continue
         }
-        for (const conv of convs) {
-          const p = join(wsDir, conv, 'index.json')
-          if (existsSync(p)) out.push(p)
+        const candidates = convs.map((conv) => join(wsDir, conv, 'index.json'))
+        const checks = await Promise.all(candidates.map((p) => pathExistsAsync(p)))
+        for (let i = 0; i < candidates.length; i++) {
+          if (checks[i]) out.push(candidates[i])
         }
       }
     }
@@ -151,19 +159,13 @@ export class CodeBuddyAdapter implements AgentAdapter {
     let lastTs = ctx.state.lastTs
 
     // 1) history index.json → 逐请求用量 + 会话时间轴
-    if (existsSync(EXT_DATA)) {
+    if (await pathExistsAsync(EXT_DATA)) {
       const usageRows: Parameters<StoreWriter['insertUsage']>[0] = []
       const sessionRows: Parameters<StoreWriter['upsertSessions']>[0] = []
-      for (const path of enumerateHistory()) {
+      for (const st of await statFilesAsync(await enumerateHistory())) {
+        const path = st.file
         const convDir = path.slice(0, -'/index.json'.length)
         const sessionId = convDir.split(/[\\/]/).pop() ?? convDir
-        let st: { mtimeMs: number; size: number }
-        try {
-          const s = statSync(path)
-          st = { mtimeMs: s.mtimeMs, size: s.size }
-        } catch {
-          continue
-        }
         const prev = stamps.get(path)
         const changed = !prev || prev.m !== st.mtimeMs || prev.s !== st.size
         if (changed) {
@@ -214,7 +216,11 @@ export class CodeBuddyAdapter implements AgentAdapter {
     }
 
     // 2) vscdb 会话元数据（title/cwd，覆盖最近会话）
-    if (existsSync(this.vscdb)) {
+    const sqliteStamps: Record<string, string> = {
+      ...((ctx.state.meta.sqliteStamps as Record<string, string> | undefined) ?? {})
+    }
+    const vscdbStamp = sqliteFileStamp(this.vscdb)
+    if (vscdbStamp && sqliteStamps[this.vscdb] !== vscdbStamp) {
       try {
         const db = openReadonlyDb(this.vscdb)
         try {
@@ -247,6 +253,7 @@ export class CodeBuddyAdapter implements AgentAdapter {
             }
             if (sRows.length > 0) this.store.upsertSessions(sRows)
           }
+          sqliteStamps[this.vscdb] = vscdbStamp
         } finally {
           db.close()
         }
@@ -262,7 +269,7 @@ export class CodeBuddyAdapter implements AgentAdapter {
       sessions,
       tools: 0,
       lastTs,
-      meta: { ...ctx.state.meta, fileStamps }
+      meta: { ...ctx.state.meta, fileStamps, sqliteStamps }
     }
   }
 }

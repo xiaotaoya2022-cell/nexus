@@ -138,6 +138,11 @@ export class QueryService {
 
   getOverview(range: RangeKey, agent: string | null, now = Date.now(), nodeId: string | null = null): Overview {
     const nodeFilter = this.resolveNodeFilter(nodeId)
+    if (agent === null && range !== 'custom') {
+      const { sig: pricingSig } = this.getPricingConfig()
+      const hit = this.boardCache.get(this.boardCacheKey(range, null, nodeFilter, null, pricingSig))
+      if (hit) return hit.overview
+    }
     const w = this.where(range, agent, now, nodeFilter)
     const sum = normalize(
       this.store.db
@@ -221,6 +226,15 @@ export class QueryService {
       toolCallCount: Number(toolRow?.c) || 0,
       activeModels: Number(modelRow?.c) || 0
     }
+  }
+
+  /** 托盘轻量今日总 token 查询：仅按 usage_records(ts) 单索引聚合，避免全量 overview 扫描。 */
+  getTodayTokensFast(now = Date.now()): number {
+    const since = rangeStartMs('today', now)
+    const row = this.store.db
+      .prepare(`SELECT COALESCE(SUM(${TOTAL_EXPR}), 0) t FROM usage_records WHERE ts >= ?`)
+      .get(since) as { t: number | null } | undefined
+    return Number(row?.t) || 0
   }
 
   getTrend(
@@ -590,6 +604,16 @@ export class QueryService {
   /** 看板结果缓存：agent=null 且无自定义范围/项目过滤时按 range 缓存，sync 或定价修改时失效。 */
   private boardCache = new Map<string, BoardData>()
 
+  private boardCacheKey(
+    range: RangeKey,
+    agent: string | null,
+    nodeFilter: string | null,
+    projFilter: string | null,
+    pricingSig: string
+  ): string {
+    return `${range}:${agent ?? 'all'}:${nodeFilter ?? 'all'}:${projFilter ?? 'all'}:${pricingSig}`
+  }
+
   invalidateBoardCache(): void {
     this.boardCache.clear()
   }
@@ -620,7 +644,7 @@ export class QueryService {
     const { config: pricingConfig, sig: pricingSig } = this.getPricingConfig()
     const cacheKey = custom
       ? `custom:${since}:${until}:${agent ?? 'all'}:${nodeFilter ?? 'all'}:${projFilter ?? 'all'}:${pricingSig}`
-      : `${range}:${agent ?? 'all'}:${nodeFilter ?? 'all'}:${projFilter ?? 'all'}:${pricingSig}`
+      : this.boardCacheKey(range, agent, nodeFilter, projFilter, pricingSig)
     if (agent === null && !custom && !projFilter) {
       const hit = this.boardCache.get(cacheKey)
       if (hit) return hit

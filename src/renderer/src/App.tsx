@@ -18,6 +18,7 @@ import { EChart } from './charts/EChart'
 import { AgentSidebar } from './components/AgentSidebar'
 import { CommandPalette } from './components/CommandPalette'
 import { CursorSettingsSection, GlobalCursorMount } from './components/CustomCursor'
+import { DateTimeInput } from './components/DateTimeInput'
 import { ExportMenu } from './components/ExportMenu'
 import { MeshView } from './components/MeshView'
 import { ScrollReveal, SpotlightGroup, useViewCrossfade } from './components/MotionEffects'
@@ -42,6 +43,7 @@ import {
   KpiCard,
   LegendItem,
   MoonIcon,
+  NexusSelect,
   PillSwitcher,
   RANGE_OPTIONS,
   RefreshIcon,
@@ -426,20 +428,95 @@ export default function App(): JSX.Element {
         100
       : null
 
+  const dragRef = useRef<{
+    pointerId: number
+    startX: number
+    startY: number
+    started: boolean
+    rafId: number | null
+  } | null>(null)
+
+  const NON_DRAG_SELECTOR =
+    'button, a, input, select, textarea, [role="button"], [role="combobox"], [role="listbox"], [role="option"], [role="dialog"], [data-no-drag], .fixed'
+
+  const finishHeaderDrag = (el: HTMLElement | null): void => {
+    const st = dragRef.current
+    if (!st) return
+    dragRef.current = null
+    if (st.rafId !== null) window.cancelAnimationFrame(st.rafId)
+    if (st.started) {
+      if (el) {
+        try {
+          if (el.hasPointerCapture(st.pointerId)) el.releasePointerCapture(st.pointerId)
+        } catch {
+          // ignore release errors
+        }
+      }
+      nexus.endWindowDrag()
+    }
+  }
+
+  useEffect(() => {
+    const onWindowBlur = (): void => finishHeaderDrag(null)
+    window.addEventListener('blur', onWindowBlur)
+    return () => {
+      window.removeEventListener('blur', onWindowBlur)
+      finishHeaderDrag(null)
+    }
+  }, [])
+
   return (
     <div className="flex h-full flex-col bg-background text-foreground">
       <GlobalCursorMount />
       {/* 顶栏：自绘窗口控制钮（frame:false）——随主题 class 即时变色，无原生 WCO 同步问题。
-          双击顶栏空白切换最大化。 */}
+          采用 IPC 拖动 + 双击空白区最大化，避免 Win32 HTCAPTION 劫持自定义鼠标光标。 */}
       <header
         onDoubleClick={(e) => {
-          // 双击空白区（非按钮）切换最大化
+          // 双击空白区（非交互区）切换最大化
           const el = e.target as HTMLElement
-          if (el.closest('button, select, input, a')) return
+          if (el.closest(NON_DRAG_SELECTOR)) return
           void nexus.toggleMaximizeWindow()
         }}
-        style={{WebkitAppRegion: "drag"} as React.CSSProperties}
-        className="relative flex h-12 shrink-0 items-center gap-4 border-b border-border bg-panel px-4"
+        onPointerDown={(e) => {
+          if (e.button !== 0 || e.detail >= 2) return
+          const el = e.target as HTMLElement
+          if (el.closest(NON_DRAG_SELECTOR)) return
+          dragRef.current = {
+            pointerId: e.pointerId,
+            startX: e.clientX,
+            startY: e.clientY,
+            started: false,
+            rafId: null
+          }
+        }}
+        onPointerMove={(e) => {
+          const st = dragRef.current
+          if (!st || st.pointerId !== e.pointerId) return
+          if (!st.started) {
+            if (Math.hypot(e.clientX - st.startX, e.clientY - st.startY) < 4) return
+            st.started = true
+            try {
+              e.currentTarget.setPointerCapture(e.pointerId)
+            } catch {
+              // ignore capture failures
+            }
+            const ratioX = window.innerWidth > 0 ? e.clientX / window.innerWidth : 0.5
+            nexus.startWindowDrag(ratioX, e.clientY)
+            return
+          }
+          if (st.rafId === null) {
+            st.rafId = window.requestAnimationFrame(() => {
+              if (dragRef.current) {
+                dragRef.current.rafId = null
+                nexus.moveWindowDrag()
+              }
+            })
+          }
+        }}
+        onPointerUp={(e) => finishHeaderDrag(e.currentTarget)}
+        onPointerCancel={(e) => finishHeaderDrag(e.currentTarget)}
+        onLostPointerCapture={(e) => finishHeaderDrag(e.currentTarget)}
+        className="relative flex h-12 shrink-0 select-none items-center gap-4 border-b border-border bg-panel px-4"
       >
         <div className="flex items-center gap-2">
           {/* 标题栏品牌徽章：平面白底 + 轻阴影（PO 定稿：去立体感、留阴影） */}
@@ -456,7 +533,7 @@ export default function App(): JSX.Element {
         {/* 一级视图切换：总控看板 ↔ 算力组网 Mesh */}
         <nav
           aria-label="Primary views"
-          style={{WebkitAppRegion: "no-drag"} as React.CSSProperties}
+          data-no-drag=""
           className="relative isolate flex h-7 items-center rounded-full bg-surface p-0.5"
         >
           <SlidingTabIndicator activeSelector='button[data-active="true"]' />
@@ -494,7 +571,7 @@ export default function App(): JSX.Element {
         <button
           type="button"
           data-cmdk-trigger=""
-          style={{WebkitAppRegion: "no-drag"} as React.CSSProperties}
+          data-no-drag=""
           onClick={() => setCmdkOpen(true)}
           title={`${t('cmdk.button')} (Ctrl+K)`}
           className="hidden h-7 cursor-pointer items-center gap-1.5 rounded-full border border-hairline bg-surface px-2.5 text-ui-xs text-foreground-subtle transition-colors duration-150 hover:border-border hover:bg-hover hover:text-foreground sm:flex"
@@ -504,12 +581,12 @@ export default function App(): JSX.Element {
             Ctrl K
           </kbd>
         </button>
-        <div className="flex-1" style={{WebkitAppRegion: "no-drag"} as React.CSSProperties} />
+        <div className="flex-1" />
         {sync.phase === 'running' && (
           <span className="text-ui-xs text-foreground-subtle">{t('header.syncing')}</span>
         )}
         {activeView === 'board' && (
-          <div className="relative" style={{WebkitAppRegion: "no-drag"} as React.CSSProperties}>
+          <div className="relative" data-no-drag="">
             <PillSwitcher
               options={[
                 ...RANGE_OPTIONS.map((o) => ({ ...o, label: t(`range.${o.key}`) })),
@@ -532,18 +609,16 @@ export default function App(): JSX.Element {
                 <div className="nx-fade-in absolute right-0 top-9 z-20 w-80 rounded-xl border border-border bg-card p-4">
                   <div className="mb-3 text-ui-base font-medium">{t('custom.title')}</div>
                   <label className="mb-1 block text-ui-xs text-foreground-subtle">{t('custom.start')}</label>
-                  <input
-                    type="datetime-local"
+                  <DateTimeInput
+                    ariaLabel={t('custom.start')}
                     value={customFrom}
-                    onChange={(e) => setCustomFrom(e.target.value)}
-                    className="h-8 w-full rounded-lg border border-border bg-card px-2 font-mono text-ui-sm text-foreground"
+                    onChange={setCustomFrom}
                   />
                   <label className="mb-1 mt-3 block text-ui-xs text-foreground-subtle">{t('custom.end')}</label>
-                  <input
-                    type="datetime-local"
+                  <DateTimeInput
+                    ariaLabel={t('custom.end')}
                     value={customTo}
-                    onChange={(e) => setCustomTo(e.target.value)}
-                    className="h-8 w-full rounded-lg border border-border bg-card px-2 font-mono text-ui-sm text-foreground"
+                    onChange={setCustomTo}
                   />
                   <div className="mt-4 flex gap-2">
                     <button
@@ -569,7 +644,7 @@ export default function App(): JSX.Element {
         )}
         <SystemPill />
         <AccountPanel />
-        <IconButton style={{WebkitAppRegion: "no-drag"} as React.CSSProperties} title={t('header.action.syncNow')} onClick={() => void nexus.syncNow()} spinning={sync.phase === 'running'}>
+        <IconButton title={t('header.action.syncNow')} onClick={() => void nexus.syncNow()} spinning={sync.phase === 'running'}>
           <RefreshIcon />
         </IconButton>
         <IconButton title={theme === 'dark' ? t('header.action.toggleLight') : t('header.action.toggleDark')} onClick={() => void toggleTheme()}>
@@ -579,7 +654,7 @@ export default function App(): JSX.Element {
         {activeView === 'board' && (
           <button
             type="button"
-            style={{WebkitAppRegion: "no-drag"} as React.CSSProperties}
+            data-no-drag=""
             title={t('header.action.sessions')}
             onClick={() => setSessionsDrawerOpen((v) => !v)}
             className="flex h-7 items-center gap-1 rounded-lg px-2 text-ui-xs text-foreground-subtle transition-colors duration-150 hover:bg-hover hover:text-foreground 2xl:hidden"
@@ -590,7 +665,7 @@ export default function App(): JSX.Element {
             </span>
           </button>
         )}
-        <IconButton style={{WebkitAppRegion: "no-drag"} as React.CSSProperties} title={t('header.action.settings')} onClick={() => void openSettings()}>
+        <IconButton title={t('header.action.settings')} onClick={() => void openSettings()}>
           <GearIcon />
         </IconButton>
         <WindowControls />
@@ -603,17 +678,19 @@ export default function App(): JSX.Element {
             >
             <div className="mb-3 text-ui-base font-medium">{t('settings.title')}</div>
             <label className="mb-1 block text-ui-xs text-foreground-subtle">{t('settings.language')}</label>
-            <select
+            <NexusSelect
+              ariaLabel={t('settings.language')}
               value={getLang()}
-              onChange={(e) => {
-                setLang(e.target.value as Lang)
+              onChange={(langVal: Lang) => {
+                setLang(langVal)
                 void nexus.setTheme(theme) // 触发一次设置持久化同步（语言本身走 localStorage）
               }}
-              className="h-7 w-full rounded-lg border border-border bg-card px-2 text-ui-base text-foreground"
-            >
-              <option value="zh-CN">{t('settings.lang.zh')}</option>
-              <option value="en">{t('settings.lang.en')}</option>
-            </select>
+              className="h-7 w-full text-ui-base"
+              options={[
+                { value: 'zh-CN', label: t('settings.lang.zh') },
+                { value: 'en', label: t('settings.lang.en') }
+              ]}
+            />
             <label className="mb-1 mt-3 block text-ui-xs text-foreground-subtle">{t('settings.uiStyle')}</label>
             <div className="relative isolate grid grid-cols-2 gap-1 rounded-lg border border-border bg-surface p-0.5">
               <SlidingTabIndicator
@@ -646,16 +723,18 @@ export default function App(): JSX.Element {
             <SettingsPreferencesSection onToast={setToast} />
             <div className="my-3 h-px bg-hairline" />
             <label className="mb-1 block text-ui-xs text-foreground-subtle">{t('settings.retention')}</label>
-            <select
+            <NexusSelect
+              ariaLabel={t('settings.retention')}
               value={retention}
-              onChange={(e) => void changeRetention(Number(e.target.value))}
-              className="h-7 w-full rounded-lg border border-border bg-card px-2 text-ui-base text-foreground"
-            >
-              <option value={0}>{t('settings.retention.forever')}</option>
-              <option value={90}>{t('settings.retention.days', { n: 90 })}</option>
-              <option value={180}>{t('settings.retention.days', { n: 180 })}</option>
-              <option value={365}>{t('settings.retention.days', { n: 365 })}</option>
-            </select>
+              onChange={(days: number) => void changeRetention(days)}
+              className="h-7 w-full text-ui-base"
+              options={[
+                { value: 0, label: t('settings.retention.forever') },
+                { value: 90, label: t('settings.retention.days', { n: 90 }) },
+                { value: 180, label: t('settings.retention.days', { n: 180 }) },
+                { value: 365, label: t('settings.retention.days', { n: 365 }) }
+              ]}
+            />
             <div className="mt-1 text-ui-xs text-foreground-subtlest">
               {t('settings.retention.hint')}
             </div>
@@ -1282,7 +1361,7 @@ export default function App(): JSX.Element {
 
       {/* Toast */}
       {toast && (
-        <div className="nx-fade-in fixed bottom-4 right-4 max-w-md rounded-lg border border-border bg-card px-3 py-1.5 text-ui-sm text-foreground">
+        <div className="nx-fade-in fixed bottom-4 right-4 z-[160] max-w-md rounded-lg border border-border bg-card px-3 py-1.5 text-ui-sm text-foreground shadow-lg">
           {toast}
         </div>
       )}

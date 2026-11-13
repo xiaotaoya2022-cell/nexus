@@ -14,10 +14,11 @@ import type {
   StoreWriter
 } from '@main/modules/adapter/domain/types'
 import {
-  collectFilesMulti,
+  collectFilesMultiAsync,
   openReadonlyDb,
   parseTimestampMs,
   readJsonlOrZstdLines,
+  sqliteFileStamp,
   tableExists
 } from '../util'
 
@@ -27,6 +28,7 @@ interface CodexMeta {
   models?: Record<string, string | null>
   sessionIds?: Record<string, string>
   lastHistoryMs?: number
+  sqliteStamps?: Record<string, string>
 }
 
 interface SessionAcc {
@@ -73,6 +75,7 @@ export class CodexAdapter implements AgentAdapter {
     const fileStamps: Record<string, string> = { ...(meta.fileStamps ?? {}) }
     const models: Record<string, string | null> = { ...(meta.models ?? {}) }
     const sessionIds: Record<string, string> = { ...(meta.sessionIds ?? {}) }
+    const sqliteStamps: Record<string, string> = { ...(meta.sqliteStamps ?? {}) }
     let lastHistoryMs = typeof meta.lastHistoryMs === 'number' ? meta.lastHistoryMs : 0
 
     const result: SyncResult = {
@@ -84,8 +87,8 @@ export class CodexAdapter implements AgentAdapter {
     }
 
     const files = [
-      ...collectFilesMulti(this.sessionsDir, ['.jsonl', '.jsonl.zst', '.jsonl.zstd'], 5),
-      ...collectFilesMulti(this.archivedDir, ['.jsonl', '.jsonl.zst', '.jsonl.zstd'], 5)
+      ...(await collectFilesMultiAsync(this.sessionsDir, ['.jsonl', '.jsonl.zst', '.jsonl.zstd'], 5)),
+      ...(await collectFilesMultiAsync(this.archivedDir, ['.jsonl', '.jsonl.zst', '.jsonl.zstd'], 5))
     ].sort()
 
     const sessions = new Map<string, SessionAcc>()
@@ -237,7 +240,8 @@ export class CodexAdapter implements AgentAdapter {
     }
 
     // 补充读取 state_5.sqlite 的 threads 表（完整会话标题、cwd、起止时间）
-    if (existsSync(this.stateDbPath)) {
+    const stateStamp = sqliteFileStamp(this.stateDbPath)
+    if (stateStamp && sqliteStamps[this.stateDbPath] !== stateStamp) {
       try {
         const db = openReadonlyDb(this.stateDbPath)
         try {
@@ -277,6 +281,7 @@ export class CodexAdapter implements AgentAdapter {
               })
             }
           }
+          sqliteStamps[this.stateDbPath] = stateStamp
         } finally {
           db.close()
         }
@@ -286,7 +291,8 @@ export class CodexAdapter implements AgentAdapter {
     }
 
     // 补充读取 thread_history_1.sqlite 的 thread_items 工具调用
-    if (existsSync(this.historyDbPath)) {
+    const historyStamp = sqliteFileStamp(this.historyDbPath)
+    if (historyStamp && sqliteStamps[this.historyDbPath] !== historyStamp) {
       try {
         const db = openReadonlyDb(this.historyDbPath)
         try {
@@ -330,6 +336,7 @@ export class CodexAdapter implements AgentAdapter {
               if (tsMs != null && tsMs > lastHistoryMs) lastHistoryMs = tsMs
             }
           }
+          sqliteStamps[this.historyDbPath] = historyStamp
         } finally {
           db.close()
         }
@@ -353,7 +360,7 @@ export class CodexAdapter implements AgentAdapter {
         }))
       )
     }
-    result.meta = { fileStamps, models, sessionIds, lastHistoryMs }
+    result.meta = { fileStamps, models, sessionIds, lastHistoryMs, sqliteStamps }
     return result
   }
 }

@@ -13,6 +13,7 @@ import {
 import { randomBytes } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+import type { SyncProgress } from '@shared/types'
 import { NexusStore } from './modules/aggregator/infrastructure/store'
 import { createAdapters, PRESENCE_ONLY_AGENTS } from './modules/adapter/application/registry'
 import { SyncService } from './modules/aggregator/application/sync-service'
@@ -249,13 +250,17 @@ app.whenReady()
   // 看板缓存：sync 有新数据即失效；随后 3s 错峰预热常用范围（7天+全部），
   // 让用户切范围基本命中内存（0ms）。预热本身 ~0.7s，撞上用户点击的概率 <2%。
   let boardWarmer: NodeJS.Timeout | null = null
-  const onSyncDone = (): void => {
-    query.invalidateBoardCache()
-    alertMonitor?.evaluate()
-    onTrayStateRefresh?.()
+  let hasInitialSyncDone = false
+  const onSyncDone = (progress: SyncProgress): void => {
+    const hasChanges = progress.results.some((r) => r.records > 0 || r.sessions > 0 || r.tools > 0)
     if (meshClient && meshClient.loadConfig() && identity.getEffectiveRole() === 'spoke') {
       void meshClient.syncDelta().catch(() => undefined)
     }
+    if (!hasChanges && hasInitialSyncDone) return
+    hasInitialSyncDone = true
+    query.invalidateBoardCache()
+    alertMonitor?.evaluate()
+    onTrayStateRefresh?.()
     if (boardWarmer) clearTimeout(boardWarmer)
     boardWarmer = setTimeout(() => {
       boardWarmer = null
@@ -263,7 +268,6 @@ app.whenReady()
         const saved = store?.getSetting('range')
         const preferred = saved === 'today' || saved === '7d' || saved === '30d' || saved === 'month' || saved === 'year' || saved === 'all' ? saved : '7d'
         query.getBoard(preferred, null)
-        if (preferred !== 'all') query.getBoard('all', null)
       } catch {
         // 预热失败静默，用户点击时现算
       }
@@ -271,7 +275,7 @@ app.whenReady()
   }
   sync = new SyncService(store, adapters, (p) => {
     broadcastSyncProgress(mainWindow, p)
-    if (p.phase === 'done') onSyncDone()
+    if (p.phase === 'done') onSyncDone(p)
   })
 
   // v2：系统采集 / 多开实例 / DSH 桥接 / 远程服务 / Mesh 组网
@@ -356,7 +360,10 @@ app.whenReady()
           })
         }
       }
-      if (billRows.length > 0) store?.insertUsage(billRows)
+      if (billRows.length > 0) {
+        store?.insertUsage(billRows)
+        query.invalidateBoardCache()
+      }
     } catch (err) {
       logger.warn('quota.usage_sink_failed', { platform, error: err instanceof Error ? err.message : String(err) })
     }
@@ -412,16 +419,19 @@ app.whenReady()
   }
 
   let latestMeshOnline: { online: number; total: number } | null = null
+  let lastTrayVisible: boolean | null = null
   const refreshTray = (): void => {
     if (!tray) return
     try {
-      const todayTokens = query.getOverview('today', null).totals.total
+      const todayTokens = query.getTodayTokensFast()
       const meshSuffix =
         latestMeshOnline && latestMeshOnline.total > 1
           ? ` · ${latestMeshOnline.online}/${latestMeshOnline.total} 节点在线`
           : ''
       tray.setToolTip(`Nexus · 今日 ${formatCompactTokens(todayTokens)} tk${meshSuffix}`)
       const visible = Boolean(mainWindow && mainWindow.isVisible())
+      if (lastTrayVisible === visible) return
+      lastTrayVisible = visible
       const menu = Menu.buildFromTemplate([
         {
           label: visible ? '隐藏到系统托盘' : '显示主界面',

@@ -340,6 +340,9 @@ export interface NexusApi {
   closeWindow(): Promise<void>
   isMaximized(): Promise<boolean>
   onMaximizeChange(cb: (maximized: boolean) => void): () => void
+  startWindowDrag(ratioX?: number, clientY?: number): void
+  moveWindowDrag(): void
+  endWindowDrag(): void
   getTrend(range: RangeKey, agent: string | null, groupBy: 'model' | 'agent'): Promise<TrendPoint[]>
   getByAgent(range: RangeKey): Promise<NamedStat[]>
   getByModel(range: RangeKey, agent: string | null): Promise<NamedStat[]>

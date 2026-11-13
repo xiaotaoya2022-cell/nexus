@@ -20,7 +20,7 @@ import type {
   SyncResult,
   StoreWriter
 } from '@main/modules/adapter/domain/types'
-import { openReadonlyDb, tableExists, tableColumns } from '../util'
+import { openReadonlyDb, sqliteFileStamp, tableExists, tableColumns } from '../util'
 
 const HOME = homedir()
 const WB_NEW = join(HOME, '.workbuddy-ai')
@@ -355,9 +355,13 @@ export class WorkBuddyAdapter implements AgentAdapter {
     if (traceRows.length > 0) records += this.store.insertUsage(traceRows)
 
     // 3) workbuddy.db sessions（title/model/cwd）
+    const sqliteStamps: Record<string, string> = {
+      ...((ctx.state.meta.sqliteStamps as Record<string, string> | undefined) ?? {})
+    }
     for (const base of [WB_NEW, WB_OLD]) {
       const dbPath = join(base, 'workbuddy.db')
-      if (!existsSync(dbPath)) continue
+      const dbStamp = sqliteFileStamp(dbPath)
+      if (!dbStamp || sqliteStamps[dbPath] === dbStamp) continue
       try {
         const db = openReadonlyDb(dbPath)
         try {
@@ -401,6 +405,7 @@ export class WorkBuddyAdapter implements AgentAdapter {
             }
             if (sRows.length > 0) sessions = this.store.upsertSessions(sRows)
           }
+          sqliteStamps[dbPath] = dbStamp
         } finally {
           db.close()
         }
@@ -416,7 +421,7 @@ export class WorkBuddyAdapter implements AgentAdapter {
       sessions,
       tools,
       lastTs: ctx.now,
-      meta: { ...ctx.state.meta, fileStamps, jsonlOffsetsV2: jsonlOffsets }
+      meta: { ...ctx.state.meta, fileStamps, jsonlOffsetsV2: jsonlOffsets, sqliteStamps }
     }
   }
 }

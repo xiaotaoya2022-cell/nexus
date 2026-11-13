@@ -16,11 +16,14 @@ import type {
   StoreWriter
 } from '@main/modules/adapter/domain/types'
 import {
-  collectFiles,
+  collectFilesAsync,
   openReadonlyDb,
   parseTimestampMs,
   readJsonlOrZstdLines,
-  tableExists
+  sqliteFileStamp,
+  statFilesAsync,
+  tableExists,
+  yieldToEventLoop
 } from '../util'
 
 const BASE = join(process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming'), 'reasonix')
@@ -95,6 +98,9 @@ export class ReasonixAdapter implements AgentAdapter {
     )
     const jsonlStamps: Record<string, string> = {
       ...((ctx.state.meta.jsonlStamps as Record<string, string> | undefined) ?? {})
+    }
+    const sqliteStamps: Record<string, string> = {
+      ...((ctx.state.meta.sqliteStamps as Record<string, string> | undefined) ?? {})
     }
 
     let records = 0
@@ -215,7 +221,8 @@ export class ReasonixAdapter implements AgentAdapter {
     // 3) %LOCALAPPDATA%/reasonix/session-catalog/v4.sqlite & v5.sqlite
     for (const ver of ['v4.sqlite', 'v5.sqlite']) {
       const dbPath = join(LOCAL_BASE, 'session-catalog', ver)
-      if (!existsSync(dbPath)) continue
+      const dbStamp = sqliteFileStamp(dbPath)
+      if (!dbStamp || sqliteStamps[dbPath] === dbStamp) continue
       try {
         const db = openReadonlyDb(dbPath)
         try {
@@ -250,6 +257,7 @@ export class ReasonixAdapter implements AgentAdapter {
               })
             }
           }
+          sqliteStamps[dbPath] = dbStamp
         } finally {
           db.close()
         }
@@ -260,7 +268,8 @@ export class ReasonixAdapter implements AgentAdapter {
 
     // 4) %LOCALAPPDATA%/reasonix/task-catalog/v1.sqlite
     const taskDbPath = join(LOCAL_BASE, 'task-catalog', 'v1.sqlite')
-    if (existsSync(taskDbPath)) {
+    const taskStamp = sqliteFileStamp(taskDbPath)
+    if (taskStamp && sqliteStamps[taskDbPath] !== taskStamp) {
       try {
         const db = openReadonlyDb(taskDbPath)
         try {
@@ -285,6 +294,7 @@ export class ReasonixAdapter implements AgentAdapter {
               })
             }
           }
+          sqliteStamps[taskDbPath] = taskStamp
         } finally {
           db.close()
         }
@@ -295,8 +305,8 @@ export class ReasonixAdapter implements AgentAdapter {
 
     // 5) %APPDATA%/reasonix/{sessions,projects/*/sessions}/*.jsonl 会话消息与 tool_calls
     const jsonlFiles = [
-      ...collectFiles(this.sessionsDir, '.jsonl', 2),
-      ...collectFiles(this.projectsDir, '.jsonl', 4)
+      ...(await collectFilesAsync(this.sessionsDir, '.jsonl', 2)),
+      ...(await collectFilesAsync(this.projectsDir, '.jsonl', 4))
     ].filter(
       (f) =>
         !f.includes('-recovery-') &&
@@ -304,14 +314,8 @@ export class ReasonixAdapter implements AgentAdapter {
         !f.endsWith('.events.jsonl')
     )
 
-    for (const file of jsonlFiles) {
-      let st: { mtimeMs: number; size: number }
-      try {
-        const s = statSync(file)
-        st = { mtimeMs: s.mtimeMs, size: s.size }
-      } catch {
-        continue
-      }
+    for (const st of await statFilesAsync(jsonlFiles)) {
+      const file = st.file
       const stamp = `${Math.floor(st.mtimeMs)}:${st.size}`
       if (jsonlStamps[file] === stamp) continue
 
@@ -372,6 +376,7 @@ export class ReasonixAdapter implements AgentAdapter {
         updatedAt: Math.max(existing?.updatedAt ?? 0, lastTs ?? Math.floor(st.mtimeMs))
       })
       jsonlStamps[file] = stamp
+      await yieldToEventLoop()
     }
 
     if (toolRows.length > 0) tools = this.store.insertToolCalls(toolRows)
@@ -398,7 +403,8 @@ export class ReasonixAdapter implements AgentAdapter {
         ...ctx.state.meta,
         statsOffsets: Object.fromEntries(offsets),
         seenSessions: [...seenSessions].slice(-2000),
-        jsonlStamps
+        jsonlStamps,
+        sqliteStamps
       }
     }
   }

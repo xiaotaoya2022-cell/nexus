@@ -47,7 +47,8 @@ export const GLOBAL_INTERACTIVE_CURSOR_SELECTOR = [
   "[role='slider']",
   "[role='combobox']",
   '[aria-haspopup]',
-  'label',
+  'label[for]',
+  'label:has(input, textarea, select)',
   'select',
   'summary',
   "input[type='checkbox']",
@@ -60,6 +61,9 @@ export const GLOBAL_INTERACTIVE_CURSOR_SELECTOR = [
   "[data-cursor='interactive']",
   '.cursor-pointer'
 ].join(',')
+
+const HIDDEN_CURSOR_DATA_URI =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNoaGhgBAAEhgGCm2g9SgAAAABJRU5ErkJggg=='
 
 const GLOBAL_HOST_CLASS = 'nx-cursor-global-host'
 const PANEL_HOST_CLASS = 'nx-cursor-host'
@@ -92,6 +96,18 @@ const sampleModeCache = new WeakMap<Element, GlobalCursorMode>()
 
 export function resolveSampleCursorMode(target: EventTarget | null): GlobalCursorMode | null {
   if (!(target instanceof Element)) return null
+
+  // 动态自绘控件（如 ECharts canvas）通过 inline style.cursor 实时开关 pointer，不能走永久 WeakMap 缓存
+  const isDynamicCanvas = target.tagName === 'CANVAS'
+  let cur: Element | null = target
+  for (let depth = 0; cur && depth < 5; depth += 1) {
+    if (cur instanceof HTMLElement && cur.style.cursor === 'pointer') {
+      return 'interactive'
+    }
+    cur = cur.parentElement
+  }
+  if (isDynamicCanvas) return null
+
   const cached = sampleModeCache.get(target)
   if (cached) return cached
 
@@ -100,19 +116,6 @@ export function resolveSampleCursorMode(target: EventTarget | null): GlobalCurso
     mode = 'text'
   } else if (target.closest(GLOBAL_INTERACTIVE_CURSOR_SELECTOR)) {
     mode = 'interactive'
-  } else {
-    let cur: Element | null = target
-    for (let depth = 0; cur && depth < 5; depth += 1) {
-      try {
-        if (window.getComputedStyle(cur).cursor === 'pointer') {
-          mode = 'interactive'
-          break
-        }
-      } catch {
-        break
-      }
-      cur = cur.parentElement
-    }
   }
   if (mode) sampleModeCache.set(target, mode)
   return mode
@@ -212,7 +215,14 @@ export function GlobalSpringCursor({ size = DEFAULT_SIZE }: { size?: number }): 
     let jumpCount = 0
     let lastJumpAt = 0
     let lastSampleAt = 0
+    let prevRawX = 0
+    let prevRawY = 0
+    let hasPrevRaw = false
     const state = { x: 0, y: 0, vx: 0, vy: 0, tx: 0, ty: 0, seen: false }
+
+    // 预解码极微透明 1×1 PNG 光标，确保首帧即命中缓存而不触发 SetCursor(NULL)
+    const preload = new Image()
+    preload.src = HIDDEN_CURSOR_DATA_URI
 
     const applyMode = (next: GlobalCursorMode): void => {
       if (next === mode) return
@@ -274,46 +284,64 @@ export function GlobalSpringCursor({ size = DEFAULT_SIZE }: { size?: number }): 
     }
 
     const start = (): void => {
+      root.classList.add(GLOBAL_HOST_CLASS)
       if (running) return
       running = true
       lastTime = performance.now()
-      root.classList.add(GLOBAL_HOST_CLASS)
       rafId = requestAnimationFrame(tick)
     }
 
-    const stop = (): void => {
-      if (!running) return
+    const stop = (removeHostClass = false): void => {
+      if (removeHostClass) root.classList.remove(GLOBAL_HOST_CLASS)
+      if (!running) {
+        dot.style.opacity = '0'
+        state.seen = false
+        hasPrevRaw = false
+        return
+      }
       running = false
       cancelAnimationFrame(rafId)
-      root.classList.remove(GLOBAL_HOST_CLASS)
       dot.style.opacity = '0'
       state.seen = false
+      hasPrevRaw = false
       deferred = false
       pressed = false
     }
 
-    const sampleCursorModeAt = (x: number, y: number): GlobalCursorMode => {
-      if (typeof document.elementsFromPoint !== 'function') {
-        return globalCursorModeFromTarget(document.elementFromPoint(x, y))
+    // 挂载即接管全局指针隐藏类，避免首帧及组件显隐瞬间闪烁系统光标
+    root.classList.add(GLOBAL_HOST_CLASS)
+
+    const pointElement = (px: number, py: number): Element | null => {
+      if (typeof document.elementFromPoint === 'function') {
+        return document.elementFromPoint(px, py)
       }
+      return typeof document.elementsFromPoint === 'function'
+        ? document.elementsFromPoint(px, py)[0] ?? null
+        : null
+    }
+
+    const sampleCursorModeAt = (x: number, y: number): GlobalCursorMode => {
+      const center = pointElement(x, y)
+      const centerMode = resolveSampleCursorMode(center)
+      if (centerMode === 'text') return 'text'
+      if (centerMode === 'interactive') return 'interactive'
       const probeRadius = (size * INTERACTIVE_SIZE_MULTIPLIER) / 2
-      const centerStack = document.elementsFromPoint(x, y)
-      const ring: Array<EventTarget | null> = []
       for (let k = 0; k < RING_PROBE_COUNT; k += 1) {
         const angle = (k / RING_PROBE_COUNT) * Math.PI * 2
-        const stack = document.elementsFromPoint(
+        const el = pointElement(
           x + Math.cos(angle) * probeRadius,
           y + Math.sin(angle) * probeRadius
         )
-        ring.push(stack[0] ?? null)
+        if (resolveSampleCursorMode(el) === 'interactive') return 'interactive'
       }
-      return globalCursorModeFromSamples(centerStack[0] ?? null, ring)
+      return 'default'
     }
 
     const onPointerMove = (event: PointerEvent): void => {
       if (event.pointerType === 'touch') return
       state.tx = event.clientX
       state.ty = event.clientY
+      const wasSeen = state.seen
       const target = event.target
       deferred = target instanceof Element && target.closest('[data-nx-panel-cursor]') !== null
       if (!deferred && event.timeStamp - lastSampleAt >= SAMPLE_MIN_INTERVAL_MS) {
@@ -326,9 +354,16 @@ export function GlobalSpringCursor({ size = DEFAULT_SIZE }: { size?: number }): 
         state.vx = 0
         state.vy = 0
         state.seen = true
-      } else if (running) {
-        const jumpDistance = Math.hypot(state.tx - state.x, state.ty - state.y)
-        if (jumpDistance > CURSOR_JUMP_THRESHOLD_PX) {
+        prevRawX = state.tx
+        prevRawY = state.ty
+        hasPrevRaw = true
+      } else {
+        // 使用连续原始指针位移而非 tx-x（弹簧滞后距离），避免快速甩鼠标误判为远控跳变
+        const rawDelta = hasPrevRaw ? Math.hypot(state.tx - prevRawX, state.ty - prevRawY) : 0
+        prevRawX = state.tx
+        prevRawY = state.ty
+        hasPrevRaw = true
+        if (running && rawDelta > CURSOR_JUMP_THRESHOLD_PX) {
           const now = performance.now()
           if (now - lastJumpAt > CURSOR_JUMP_WINDOW_MS) jumpCount = 0
           lastJumpAt = now
@@ -340,15 +375,19 @@ export function GlobalSpringCursor({ size = DEFAULT_SIZE }: { size?: number }): 
               // ignore storage failures
             }
             setDegraded(true)
-            stop()
+            stop(true)
             dispatchCursorDegradedChanged()
             emitCursorToast(t('cursor.degradedToast'))
             return
           }
         }
       }
-      if (!running) start()
-      else paint()
+      if (!running) {
+        start()
+        paint()
+      } else if (!wasSeen) {
+        paint()
+      }
     }
 
     const onPointerDown = (event: PointerEvent): void => {
@@ -363,8 +402,8 @@ export function GlobalSpringCursor({ size = DEFAULT_SIZE }: { size?: number }): 
       if (running) paint()
     }
 
-    const onPointerLeave = (): void => stop()
-    const onBlur = (): void => stop()
+    const onPointerLeave = (): void => stop(false)
+    const onBlur = (): void => stop(false)
 
     dot.style.width = `${size}px`
     dot.style.height = `${size}px`
@@ -375,7 +414,7 @@ export function GlobalSpringCursor({ size = DEFAULT_SIZE }: { size?: number }): 
     document.addEventListener('pointerleave', onPointerLeave)
     window.addEventListener('blur', onBlur)
     return () => {
-      stop()
+      stop(true)
       document.removeEventListener('pointermove', onPointerMove, true)
       document.removeEventListener('pointerdown', onPointerDown, true)
       window.removeEventListener('pointerup', onPointerPressEnd)
@@ -507,9 +546,20 @@ export function PanelSpringCursor({
 function CursorRecoveryProbe({ onRecovered }: { onRecovered: () => void }): null {
   const onRecoveredRef = useRef(onRecovered)
   onRecoveredRef.current = onRecovered
+  const [degraded, setDegraded] = useState(readCursorDegraded)
 
   useEffect(() => {
-    if (!readCursorDegraded()) return
+    const sync = (): void => setDegraded(readCursorDegraded())
+    window.addEventListener(CURSOR_DEGRADED_EVENT, sync)
+    window.addEventListener('storage', sync)
+    return () => {
+      window.removeEventListener(CURSOR_DEGRADED_EVENT, sync)
+      window.removeEventListener('storage', sync)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!degraded) return
     const tracker = createCursorRecoveryTracker()
     const onPointerMove = (event: PointerEvent): void => {
       if (event.pointerType === 'touch') return
@@ -522,12 +572,13 @@ function CursorRecoveryProbe({ onRecovered }: { onRecovered: () => void }): null
       if (!recovered) return
       window.removeEventListener('pointermove', onPointerMove, true)
       clearCursorDegraded()
+      setDegraded(false)
       emitCursorToast(t('cursor.restoredToast'))
       onRecoveredRef.current()
     }
     window.addEventListener('pointermove', onPointerMove, true)
     return () => window.removeEventListener('pointermove', onPointerMove, true)
-  }, [])
+  }, [degraded])
 
   return null
 }

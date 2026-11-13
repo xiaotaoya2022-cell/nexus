@@ -1,7 +1,7 @@
 // transport 层：把 query/sync/设置/导出能力以 IPC 通道暴露给渲染进程。
 // 依赖方向：transport → application → domain ← infrastructure。
 
-import { ipcMain, dialog, BrowserWindow, nativeTheme, shell, app } from 'electron'
+import { ipcMain, dialog, BrowserWindow, nativeTheme, shell, app, screen } from 'electron'
 import os from 'node:os'
 import type {
   AppAlertEvent,
@@ -357,6 +357,57 @@ export function registerIpc(deps: IpcDeps): void {
   })
   ipcMain.handle('nexus:closeWindow', () => deps.getMainWindow()?.close())
   ipcMain.handle('nexus:isMaximized', () => deps.getMainWindow()?.isMaximized() ?? false)
+
+  // JS/IPC 驱动无边框顶栏拖动（替代 -webkit-app-region: drag），避免 Win32 HTCAPTION
+  // 抢占鼠标消息与光标句柄，确保自定义弹簧光标全程覆盖顶栏并持续平滑跟手。
+  let dragState: {
+    startCursorX: number
+    startCursorY: number
+    startBounds: Electron.Rectangle
+  } | null = null
+
+  ipcMain.on('nexus:window-drag-start', (_e, ratioX?: unknown, clientY?: unknown) => {
+    const win = deps.getMainWindow()
+    if (!win || win.isDestroyed()) return
+    const pt = screen.getCursorScreenPoint()
+    if (win.isMaximized()) {
+      const normal = win.getNormalBounds()
+      const rx = typeof ratioX === 'number' && Number.isFinite(ratioX) ? Math.min(0.9, Math.max(0.1, ratioX)) : 0.5
+      const cy = typeof clientY === 'number' && Number.isFinite(clientY) ? Math.min(28, Math.max(4, clientY)) : 18
+      const disp = screen.getDisplayNearestPoint(pt)
+      const nextBounds = {
+        x: Math.round(pt.x - normal.width * rx),
+        y: Math.max(disp.workArea.y, Math.round(pt.y - cy)),
+        width: normal.width,
+        height: normal.height
+      }
+      win.unmaximize()
+      win.setBounds(nextBounds)
+      dragState = { startCursorX: pt.x, startCursorY: pt.y, startBounds: nextBounds }
+      return
+    }
+    dragState = { startCursorX: pt.x, startCursorY: pt.y, startBounds: win.getBounds() }
+  })
+
+  ipcMain.on('nexus:window-drag-move', () => {
+    if (!dragState) return
+    const win = deps.getMainWindow()
+    if (!win || win.isDestroyed()) {
+      dragState = null
+      return
+    }
+    const pt = screen.getCursorScreenPoint()
+    win.setBounds({
+      x: dragState.startBounds.x + (pt.x - dragState.startCursorX),
+      y: dragState.startBounds.y + (pt.y - dragState.startCursorY),
+      width: dragState.startBounds.width,
+      height: dragState.startBounds.height
+    })
+  })
+
+  ipcMain.on('nexus:window-drag-end', () => {
+    dragState = null
+  })
   ipcMain.handle(
     'nexus:getTrend',
     (_e, range: RangeKey, agent: string | null, groupBy: 'model' | 'agent') =>

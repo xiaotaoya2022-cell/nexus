@@ -2,6 +2,7 @@
 
 import { DatabaseSync } from 'node:sqlite'
 import { createReadStream, readFileSync, readdirSync, statSync } from 'node:fs'
+import { access, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { zstdDecompressSync } from 'node:zlib'
 
@@ -31,6 +32,30 @@ export function tableExists(db: DatabaseSync, table: string): boolean {
     .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?")
     .get(table) as { name: string } | undefined
   return row != null
+}
+
+/** 计算 SQLite 主库及 WAL 附属文件指纹（忽略 -shm，因只读连接打开时也会刷新 -shm mtime）；主库不存在返回 null */
+export function sqliteFileStamp(dbPath: string): string | null {
+  try {
+    const main = statSync(dbPath)
+    const parts = [`${main.mtimeMs}:${main.size}`]
+    for (const suffix of ['-wal']) {
+      try {
+        const s = statSync(dbPath + suffix)
+        parts.push(`${s.mtimeMs}:${s.size}`)
+      } catch {
+        parts.push('0:0')
+      }
+    }
+    return parts.join('|')
+  } catch {
+    return null
+  }
+}
+
+/** 让出一次宏任务队列，避免多适配器/大批次同步连续阻塞主线程事件循环 */
+export function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0))
 }
 
 /** 容错解析时间戳为 epoch ms：支持 epoch 秒/毫秒/微秒与 ISO 字符串 */
@@ -80,6 +105,86 @@ export function collectFilesMulti(root: string, suffixes: string[], maxDepth = 4
   }
   walk(root, 0)
   return out
+}
+
+/** 异步递归收集匹配后缀的文件（在 libuv 线程池扫描目录，避免同步阻塞主线程） */
+export async function collectFilesAsync(root: string, suffix: string, maxDepth = 4): Promise<string[]> {
+  return collectFilesMultiAsync(root, [suffix], maxDepth)
+}
+
+/** 异步递归收集匹配任一后缀的文件 */
+export async function collectFilesMultiAsync(
+  root: string,
+  suffixes: string[],
+  maxDepth = 4
+): Promise<string[]> {
+  const out: string[] = []
+  const walk = async (dir: string, depth: number): Promise<void> => {
+    if (depth > maxDepth) return
+    let entries: import('node:fs').Dirent[]
+    try {
+      entries = await readdir(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const ent of entries) {
+      const full = join(dir, ent.name)
+      let isDir = ent.isDirectory()
+      let isFile = ent.isFile()
+      if (ent.isSymbolicLink()) {
+        try {
+          const st = await stat(full)
+          isDir = st.isDirectory()
+          isFile = st.isFile()
+        } catch {
+          continue
+        }
+      }
+      if (isDir) {
+        await walk(full, depth + 1)
+      } else if (isFile && suffixes.some((s) => ent.name.endsWith(s))) {
+        out.push(full)
+      }
+    }
+  }
+  await walk(root, 0)
+  return out
+}
+
+/** 分批异步获取文件 mtimeMs 与 size，避免大量文件 statSync 阻塞主线程 */
+export async function statFilesAsync(
+  files: string[],
+  batchSize = 48
+): Promise<Array<{ file: string; mtimeMs: number; size: number }>> {
+  const out: Array<{ file: string; mtimeMs: number; size: number }> = []
+  for (let i = 0; i < files.length; i += batchSize) {
+    const slice = files.slice(i, i + batchSize)
+    const stats = await Promise.all(
+      slice.map(async (file) => {
+        try {
+          const s = await stat(file)
+          return { file, mtimeMs: s.mtimeMs, size: s.size }
+        } catch {
+          return null
+        }
+      })
+    )
+    for (const s of stats) {
+      if (s) out.push(s)
+    }
+    if (i + batchSize < files.length) await yieldToEventLoop()
+  }
+  return out
+}
+
+/** 异步判断路径是否存在（供目录/文件存在性检查不阻塞事件循环） */
+export async function pathExistsAsync(path: string): Promise<boolean> {
+  try {
+    await access(path)
+    return true
+  } catch {
+    return false
+  }
 }
 
 const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])

@@ -1,7 +1,7 @@
 // 顶栏多格式导出中心浮层：支持 PNG 看板高清长图、CSV 对账表格、Markdown 摘要报告与原始 JSON 快照。
 
 import { useEffect, useState } from 'react'
-import type { CSSProperties, JSX } from 'react'
+import type { JSX } from 'react'
 import type { ExportFormat } from '@shared/types'
 import { t, useLang } from '../i18n'
 import { ExportIcon } from './ui'
@@ -42,7 +42,7 @@ export function ExportMenu({ scopeLabel, onExport }: ExportMenuProps): JSX.Eleme
   }, [open])
 
   return (
-    <div className="relative" style={{ WebkitAppRegion: 'no-drag' } as CSSProperties}>
+    <div className="relative" data-no-drag="">
       <button
         type="button"
         data-export-trigger=""
