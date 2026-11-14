@@ -46,6 +46,8 @@ export const GLOBAL_INTERACTIVE_CURSOR_SELECTOR = [
   "[role='radio']",
   "[role='slider']",
   "[role='combobox']",
+  "[role='scrollbar']",
+  "[data-nx-scrollbar-thumb]",
   '[aria-haspopup]',
   'label[for]',
   'label:has(input, textarea, select)',

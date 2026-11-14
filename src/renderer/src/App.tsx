@@ -24,6 +24,7 @@ import { MeshView } from './components/MeshView'
 import { ScrollReveal, SpotlightGroup, useViewCrossfade } from './components/MotionEffects'
 import { NodeSwitcherBar } from './components/NodeSwitcherBar'
 import { MeshGlyph, nodeDisplayName } from './components/NodeVisuals'
+import { GlobalOverlayScrollbars } from './components/OverlayScrollbars'
 import { SessionInspectorDrawer } from './components/SessionInspectorDrawer'
 import { SessionsPanel, type SessionNodeMeta } from './components/SessionsPanel'
 import { SettingsPreferencesSection } from './components/SettingsPreferencesSection'
@@ -468,6 +469,7 @@ export default function App(): JSX.Element {
   return (
     <div className="flex h-full flex-col bg-background text-foreground">
       <GlobalCursorMount />
+      <GlobalOverlayScrollbars />
       {/* 顶栏：自绘窗口控制钮（frame:false）——随主题 class 即时变色，无原生 WCO 同步问题。
           采用 IPC 拖动 + 双击空白区最大化，避免 Win32 HTCAPTION 劫持自定义鼠标光标。 */}
       <header

@@ -297,27 +297,120 @@ body {
   overflow: hidden;
 }
 
-/* ── 滚动条（ZCode styles.css 原样规格）── */
+/* ── 隐藏系统原生滚动条：防止 Blink 绕过 CSS cursor 强制渲染默认系统箭头并与自定义鼠标共存；
+   统一由 OverlayScrollbars 接管为 0px 占位悬浮胶囊细条 ── */
 * {
-  scrollbar-width: thin;
-  scrollbar-color: var(--nx-border) transparent;
+  scrollbar-width: none;
 }
-::-webkit-scrollbar {
-  width: 14px;
-  height: 14px;
+*::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
-::-webkit-scrollbar-track {
-  background: transparent;
+
+:root,
+.theme-dark {
+  --nx-sb-track-bg: rgba(255, 255, 255, 0.05);
+  --nx-sb-track-ring: rgba(255, 255, 255, 0.08);
+  --nx-sb-thumb-idle: rgba(232, 236, 244, 0.2);
+  --nx-sb-thumb-active: rgba(232, 236, 244, 0.38);
+  --nx-sb-thumb-hover: color-mix(in srgb, var(--nx-foreground) 54%, var(--nx-cobalt) 46%);
+  --nx-sb-thumb-drag: color-mix(in srgb, var(--nx-foreground) 25%, var(--nx-signal) 75%);
+  --nx-sb-glow-hover: rgba(64, 153, 255, 0.24);
+  --nx-sb-glow-drag: color-mix(in srgb, var(--nx-signal) 40%, transparent);
 }
-::-webkit-scrollbar-thumb {
-  background-color: var(--nx-border);
+
+.theme-light {
+  --nx-sb-track-bg: rgba(15, 23, 42, 0.045);
+  --nx-sb-track-ring: rgba(15, 23, 42, 0.085);
+  --nx-sb-thumb-idle: rgba(24, 24, 27, 0.18);
+  --nx-sb-thumb-active: rgba(24, 24, 27, 0.34);
+  --nx-sb-thumb-hover: color-mix(in srgb, var(--nx-foreground) 58%, var(--nx-cobalt) 42%);
+  --nx-sb-thumb-drag: color-mix(in srgb, var(--nx-foreground) 18%, var(--nx-signal) 82%);
+  --nx-sb-glow-hover: rgba(11, 127, 255, 0.2);
+  --nx-sb-glow-drag: color-mix(in srgb, var(--nx-signal) 34%, transparent);
+}
+
+.nx-scrollbar-dragging,
+.nx-scrollbar-dragging * {
+  user-select: none !important;
+}
+
+.nx-scrollbar-track {
   border-radius: 9999px;
-  border: 3px solid transparent;
-  background-clip: padding-box;
-  min-height: 32px;
+  background-color: transparent;
+  box-shadow: inset 0 0 0 1px transparent;
+  transition:
+    background-color 180ms ease,
+    box-shadow 180ms ease;
 }
-::-webkit-scrollbar-thumb:hover {
-  background-color: var(--nx-border-hover);
+
+.nx-scrollbar-track[data-state='hover'],
+.nx-scrollbar-track[data-state='dragging'] {
+  background-color: var(--nx-sb-track-bg);
+  box-shadow: inset 0 0 0 1px var(--nx-sb-track-ring);
+  backdrop-filter: blur(6px);
+}
+
+.nx-scrollbar-thumb {
+  position: absolute;
+  border-radius: 9999px;
+  cursor: pointer;
+  background-color: var(--nx-sb-thumb-idle);
+  box-shadow: 0 0 0 0 transparent;
+  will-change: transform;
+}
+
+.nx-scrollbar-thumb[data-nx-scrollbar-thumb='y'] {
+  top: 0;
+  right: 1.5px;
+  width: 3px;
+  transition:
+    width 150ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 160ms ease,
+    box-shadow 160ms ease,
+    opacity 180ms ease;
+}
+
+.nx-scrollbar-thumb[data-nx-scrollbar-thumb='x'] {
+  left: 0;
+  bottom: 1.5px;
+  height: 3px;
+  transition:
+    height 150ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 160ms ease,
+    box-shadow 160ms ease,
+    opacity 180ms ease;
+}
+
+.nx-scrollbar-thumb[data-state='active'] {
+  background-color: var(--nx-sb-thumb-active);
+}
+
+.nx-scrollbar-thumb[data-nx-scrollbar-thumb='y'][data-state='active'] {
+  width: 4px;
+}
+
+.nx-scrollbar-thumb[data-nx-scrollbar-thumb='x'][data-state='active'] {
+  height: 4px;
+}
+
+.nx-scrollbar-thumb[data-state='hover'] {
+  background-color: var(--nx-sb-thumb-hover);
+  box-shadow: 0 0 8px var(--nx-sb-glow-hover);
+}
+
+.nx-scrollbar-thumb[data-state='dragging'] {
+  background-color: var(--nx-sb-thumb-drag);
+  box-shadow: 0 0 10px var(--nx-sb-glow-drag);
+}
+
+.nx-scrollbar-thumb[data-nx-scrollbar-thumb='y'][data-expanded='true'] {
+  width: 6px;
+}
+
+.nx-scrollbar-thumb[data-nx-scrollbar-thumb='x'][data-expanded='true'] {
+  height: 6px;
 }
 
 /* ── 动效 ── */
@@ -456,6 +549,7 @@ body {
 
 .nx-list-host [data-list-row] {
   position: relative;
+  padding-right: 14px;
 }
 
 .nx-list-host [data-list-row]:hover,
@@ -591,11 +685,6 @@ html.nx-cursor-global-host,
 html.nx-cursor-global-host *,
 html.nx-cursor-global-host *::before,
 html.nx-cursor-global-host *::after,
-html.nx-cursor-global-host ::-webkit-scrollbar,
-html.nx-cursor-global-host ::-webkit-scrollbar-track,
-html.nx-cursor-global-host ::-webkit-scrollbar-thumb,
-html.nx-cursor-global-host ::-webkit-scrollbar-button,
-html.nx-cursor-global-host ::-webkit-scrollbar-corner,
 html.nx-cursor-global-host input::-webkit-calendar-picker-indicator,
 html.nx-cursor-global-host input::-webkit-inner-spin-button,
 html.nx-cursor-global-host input::-webkit-clear-button,
