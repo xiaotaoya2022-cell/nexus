@@ -6,7 +6,14 @@
 /* ── 深色（基准）── */
 :root,
 .theme-dark {
-  --ui-font-size: 14px;
+  /* 字号基准：两种风格（porcelain 13px / nexus 14px）的平均值 13.5px，
+     两种风格字号由此完全一致；派生刻度偏移取半像素使各级保持整数 px */
+  --ui-font-size: 13.5px;
+
+  /* MEMORA「方案 A · 精密工程仪器风」字体栈（F:/MEMORA/cmd/memora/dashboard_html.go 原值），
+     两种风格统一应用 */
+  --nx-font-ui: 'Segoe UI Variable Text', 'Noto Sans SC', 'Microsoft YaHei UI', 'Segoe UI', system-ui, sans-serif;
+  --nx-font-num: 'Bahnschrift', 'Segoe UI Variable Display', 'Noto Sans SC', 'Microsoft YaHei UI', sans-serif;
 
   --nx-background: #161616;
   --nx-panel: #202020;
@@ -266,19 +273,18 @@
   --color-heat-3: var(--nx-heat-3);
   --color-heat-4: var(--nx-heat-4);
 
-  /* 字号刻度：--ui-font-size 单旋钮 */
-  --text-ui-2xs: calc(var(--ui-font-size) - 5px);
-  --text-ui-xs: calc(var(--ui-font-size) - 4px);
-  --text-ui-sm: calc(var(--ui-font-size) - 2px);
-  --text-ui-caption: calc(var(--ui-font-size) - 1px);
+  /* 字号刻度：--ui-font-size 单旋钮。偏移取半像素，13.5 基准下各级仍为整数 px
+     （MEMORA §3.3 整数像素纪律），小字号整体上浮 1px 提升可读性 */
+  --text-ui-2xs: calc(var(--ui-font-size) - 4.5px);
+  --text-ui-xs: calc(var(--ui-font-size) - 3.5px);
+  --text-ui-sm: calc(var(--ui-font-size) - 1.5px);
+  --text-ui-caption: calc(var(--ui-font-size) - 0.5px);
   --text-ui-base: var(--ui-font-size);
-  --text-ui-lg: calc(var(--ui-font-size) + 2px);
-  --text-ui-xl: calc(var(--ui-font-size) + 4px);
+  --text-ui-lg: calc(var(--ui-font-size) + 1.5px);
+  --text-ui-xl: calc(var(--ui-font-size) + 3.5px);
 
-  /* 等宽字体栈（规范 §2.1）*/
-  --font-mono:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
-    'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', monospace;
+  /* 等宽字体栈：MEMORA §3.2 方案 A（--font-mono）+ 中文兜底 */
+  --font-mono: 'Cascadia Mono', 'Consolas', ui-monospace, 'Microsoft YaHei UI', monospace;
 }
 
 html,
@@ -288,10 +294,11 @@ body,
 }
 
 body {
-  font-family:
-    system-ui, -apple-system, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei UI',
-    'Microsoft YaHei', sans-serif;
+  /* MEMORA 方案 A 正文接口字体（两种风格统一），渲染口径对齐 MEMORA 源码 */
+  font-family: var(--nx-font-ui);
   font-size: var(--ui-font-size);
+  text-rendering: optimizeLegibility;
+  font-optical-sizing: auto;
   color: var(--nx-foreground);
   background: var(--nx-background);
   overflow: hidden;
@@ -510,7 +517,7 @@ body {
 }
 
 .style-nexus .nx-kpi-val {
-  font-size: calc(var(--ui-font-size) + 8px);
+  font-size: calc(var(--ui-font-size) + 7.5px);
   font-weight: 600;
   letter-spacing: -0.025em;
   line-height: 1.15;
@@ -1035,10 +1042,7 @@ html.nx-cursor-global-host input::-webkit-search-cancel-button {
   --nx-signal-soft: rgba(37, 99, 235, 0.12);
   --nx-cobalt: #2563eb;
 
-  /* MEMORA 方案 A 字体栈（精密工程仪器风）+ 13px 基准密度 */
-  --ui-font-size: 13px;
-  --nx-font-ui: 'Segoe UI Variable Text', 'Noto Sans SC', 'Microsoft YaHei UI', 'Segoe UI', system-ui, sans-serif;
-  --nx-font-num: 'Bahnschrift', 'Segoe UI Variable Display', 'Noto Sans SC', 'Microsoft YaHei UI', sans-serif;
+  /* 字号/字体基准统一在 :root（13.5px + 方案 A），此处不再覆盖 */
 }
 
 /* 夜瓷：同语言的深色面（MEMORA 深顶栏/玻璃层色系外推，岩板阶梯 + 强调色提亮） */
@@ -1093,17 +1097,9 @@ html.nx-cursor-global-host input::-webkit-search-cancel-button {
   --nx-signal: #3b82f6;
   --nx-signal-soft: rgba(59, 130, 246, 0.16);
   --nx-cobalt: #3b82f6;
-
-  --ui-font-size: 13px;
-  --nx-font-ui: 'Segoe UI Variable Text', 'Noto Sans SC', 'Microsoft YaHei UI', 'Segoe UI', system-ui, sans-serif;
-  --nx-font-num: 'Bahnschrift', 'Segoe UI Variable Display', 'Noto Sans SC', 'Microsoft YaHei UI', sans-serif;
 }
 
 /* ── Porcelain 材质层 ── */
-
-.style-porcelain body {
-  font-family: var(--nx-font-ui);
-}
 
 /* 深色收束顶栏（昼光第一签名，MEMORA --chrome-dark）：
    变量域级联到顶栏子树，顶栏内控件免逐一改色。
@@ -1150,8 +1146,8 @@ html.nx-cursor-global-host input::-webkit-search-cancel-button {
   box-shadow: 0 3px 14px rgba(2, 6, 23, 0.45);
 }
 
-/* 数字仪表：Bahnschrift + tabular-nums + 负字距（MEMORA 排版纪律） */
-.style-porcelain .nx-kpi-val {
+/* 数字仪表：Bahnschrift + tabular-nums + 负字距（MEMORA 排版纪律，两种风格统一） */
+.nx-kpi-val {
   font-family: var(--nx-font-num);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.4px;

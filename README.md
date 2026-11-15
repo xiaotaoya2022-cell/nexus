@@ -6,7 +6,7 @@
   <sub>EVERY TOKEN FINDS ITS RECORD. ｜ 品牌理念：聚合 · 计量 · 留存 · 追溯</sub></p>
   <p>
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license"/>
-    <img src="https://img.shields.io/badge/version-v0.2.24-blue" alt="version"/>
+    <img src="https://img.shields.io/badge/version-v0.2.45-blue" alt="version"/>
     <img src="https://img.shields.io/badge/platform-Windows-lightgrey" alt="platform"/>
     <img src="https://img.shields.io/badge/privacy-纯本地-success" alt="privacy"/>
   </p>
@@ -28,21 +28,21 @@ Nexus 的回答：**在你烧的时候，就把它变成资产。** 首次同步
 
 ![overview](docs/screenshots/board-overview.png)
 
-## 570 亿 tokens 的真实环境里生长出来
+## 680 亿 tokens 的真实环境里生长出来
 
-这不是一个对着示例数据开发的玩具。以下数字来自本工具作者本人的真实使用环境（2026-11-06 实测）：
+这不是一个对着示例数据开发的玩具。以下数字来自本工具作者本人的真实使用环境（2026-11-15 实测）：
 
 | 实拍指标 | 数值 |
 | --- | --- |
-| 累计 Token 消耗 | **573.0 亿**（57,304,822,958） |
-| 会话 | 1,326 |
-| 工具调用 | 13.7 万 |
-| 模型 | 35 个 |
-| 有精确数据的 Agent | 8 个 |
+| 累计 Token 消耗 | **682.6 亿**（68,260,242,304） |
+| 会话 | 1,837 |
+| 工具调用 | 20.0 万 |
+| 模型 | 46 个 |
+| 有精确数据的 Agent | 9 个 |
 
 **先有重度使用，才有工具**——每一个数据源接入方案，都是在真实海量数据上撞出来的。
 
-![week](docs/screenshots/board-week.png)
+![today](docs/screenshots/board-week.png)
 
 ## 一块看板，补齐生态空白
 
