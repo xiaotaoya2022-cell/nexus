@@ -1,10 +1,7 @@
 // 无头 Mesh 采集端运行器（纯 Node 实现，零 Electron 依赖）：
 // 供 Linux VM / WSL2 / 纯终端环境直接采集本机 Agent 用量并增量推送至 Hub。
-// 安全口径：命令行 --pair 只落盘为待配对文件（污点终结于文件写入），
-// 网络连接一律从盘上配置/待配对文件发起，并在 socket sink 前做白名单重建+私网断言。
 
 import os from 'node:os'
-import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { NexusStore } from '@main/modules/aggregator/infrastructure/store'
 import { createAdapters } from '@main/modules/adapter/application/registry'
@@ -12,12 +9,7 @@ import { SyncService } from '@main/modules/aggregator/application/sync-service'
 import { SystemCollector } from '@main/modules/system/collector'
 import { logger, setLogDir } from '@main/modules/shared/logger'
 import { NodeIdentityService } from './identity'
-import {
-  MeshClient,
-  pairFromPendingPairFile,
-  validatePairUriForMesh,
-  type ValidatedPairRequest
-} from './client'
+import { MeshClient } from './client'
 
 export interface HeadlessMeshOptions {
   dataDir: string
@@ -25,16 +17,6 @@ export interface HeadlessMeshOptions {
   alias?: string
   intervalSec: number
   once: boolean
-}
-
-/** 待配对信箱固定路径（不随 --data-dir）：命令行值不流向网络 sink 的关键边界 */
-const PENDING_PAIR_PATH = join(os.homedir() || os.tmpdir(), '.nexus-mesh', 'mesh-pending-pair.json')
-
-/** 命令行 --pair 的唯一出口：校验后写盘。污点在此终结，不进入任何网络调用。 */
-export function persistPairRequest(pairUri: string, alias?: string): ValidatedPairRequest {
-  const req = validatePairUriForMesh(pairUri)
-  writeFileSync(PENDING_PAIR_PATH, JSON.stringify({ ...req, alias }), 'utf8')
-  return req
 }
 
 export function parseHeadlessMeshArgs(argv: string[]): { help: boolean; options: HeadlessMeshOptions } {
@@ -120,19 +102,15 @@ export async function runHeadlessMeshAgent(opts: HeadlessMeshOptions): Promise<v
   )
 
   try {
-    // --pair 已由入口层落盘（persistPairRequest，固定信箱路径）；配对连接经 client 从
-    // 盘上固定信箱发起——argv 值与 socket sink 之间零数据流（污点链收敛）
-    if (opts.pairUri !== undefined || !client.loadConfig()) {
-      const paired = await pairFromPendingPairFile(client, PENDING_PAIR_PATH)
-      if (paired) {
-        // eslint-disable-next-line no-console
-        console.log(`[mesh-agent] paired with Hub: ${client.loadConfig()?.hubUrl ?? 'ok'}`)
-      } else if (opts.pairUri !== undefined) {
-        throw new Error('待配对文件缺失或损坏：请通过 --pair "nexus-pair://..." 重新发起配对')
-      } else {
+    if (opts.pairUri) {
+      await client.pairWithHub({ uri: opts.pairUri })
+      // eslint-disable-next-line no-console
+      console.log(`[mesh-agent] paired with Hub: ${client.loadConfig()?.hubUrl ?? 'ok'}`)
+    } else {
+      const cfg = client.loadConfig()
+      if (!cfg) {
         throw new Error('尚未配对 Hub：请通过 --pair "nexus-pair://..." 完成首次配对')
       }
-    } else {
       client.start()
     }
 

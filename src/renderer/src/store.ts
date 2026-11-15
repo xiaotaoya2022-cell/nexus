@@ -49,7 +49,7 @@ export const useUi = create<UiState>((set) => ({
   range: '7d',
   agent: null,
   theme: 'dark',
-  uiStyle: 'porcelain',
+  uiStyle: 'nexus',
   sync: { phase: 'idle', agent: null, message: '', startedAt: 0, finishedAt: null, results: [] },
   customRange: null,
   pricingConfig: DEFAULT_PRICING_CONFIG,

@@ -215,7 +215,7 @@ export interface SyncProgress {
   results: Array<{ agent: string; records: number; sessions: number; tools: number; error: string | null }>
 }
 
-export type UiStyle = 'nexus' | 'porcelain'
+export type UiStyle = 'nexus' | 'classic'
 
 export type NodeKind = 'physical' | 'vmware' | 'hyperv' | 'wsl2' | 'vm' | 'mac' | 'linux'
 export type NodeRole = 'hub' | 'spoke'

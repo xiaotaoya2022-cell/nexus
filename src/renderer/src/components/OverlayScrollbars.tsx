@@ -227,7 +227,6 @@ function computeBarMetrics(
 
 export function GlobalOverlayScrollbars(): JSX.Element {
   const [bars, setBars] = useState<BarMetrics[]>([])
-  const barsSigRef = useRef('')
   const [hoveredTrackKey, setHoveredTrackKey] = useState<string | null>(null)
   const [draggingKey, setDraggingKey] = useState<string | null>(null)
 
@@ -286,18 +285,7 @@ export function GlobalOverlayScrollbars(): JSX.Element {
         }
       }
 
-      // 签名未变则跳过 setState：MutationObserver/过渡结束的联动 sync 不再引发空转重渲染
-      const sig = nextBars
-        .map(
-          (b) =>
-            `${b.key}:${b.axis}:${Math.round(b.trackLeft)},${Math.round(b.trackTop)},${Math.round(b.thumbOffset)},${Math.round(b.thumbLength)},${b.containerHovered ? 1 : 0},${b.recentlyScrolled ? 1 : 0},${Math.round(b.maxScroll)}`
-        )
-        .sort()
-        .join('|')
-      if (sig !== barsSigRef.current) {
-        barsSigRef.current = sig
-        setBars(nextBars)
-      }
+      setBars(nextBars)
 
       if (idleTimerRef.current !== null) {
         window.clearTimeout(idleTimerRef.current)

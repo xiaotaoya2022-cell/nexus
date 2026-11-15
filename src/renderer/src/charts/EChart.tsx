@@ -30,8 +30,6 @@ export function EChart({ option, className, onClick }: EChartProps): JSX.Element
   const chartRef = useRef<echarts.ECharts | null>(null)
   const onClickRef = useRef(onClick)
   onClickRef.current = onClick
-  // option 引用未变时跳过 setOption：上游重渲染（loading/主题 epoch 等）不再触发全量重绘
-  const lastOptionRef = useRef<EChartsOption | null>(null)
 
   useEffect(() => {
     const el = ref.current
@@ -52,8 +50,6 @@ export function EChart({ option, className, onClick }: EChartProps): JSX.Element
 
   useEffect(() => {
     // 动画全局关闭：切主题/切范围时图表瞬时成型（200ms 逐段动画是"慢半拍"观感的主因）
-    if (lastOptionRef.current === option) return
-    lastOptionRef.current = option
     chartRef.current?.setOption({ animation: false, ...option }, true)
   }, [option])
 
