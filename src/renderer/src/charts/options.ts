@@ -74,7 +74,7 @@ export function chartTokens(): ChartTokens {
 const MONO =
   "ui-monospace, SFMono-Regular, Menlo, Consolas, 'Microsoft YaHei UI', monospace"
 
-const AXIS_LABEL = { fontSize: 10, fontFamily: MONO }
+const AXIS_LABEL = { fontSize: 11, fontFamily: MONO }
 
 function withAlpha(color: string, alpha: number): string | undefined {
   const m = /^#([0-9a-f]{6})$/i.exec(color.trim())
@@ -330,7 +330,7 @@ export function rankBarOption(
     xAxis: {
       type: 'value',
       name: unitName,
-      nameTextStyle: { fontSize: 10, color: tokens.fgSubtlest, align: 'right' },
+      nameTextStyle: { fontSize: 11, color: tokens.fgSubtle, align: 'right' },
       nameGap: 8,
       splitNumber: 3,
       axisLabel: {
@@ -363,8 +363,8 @@ export function rankBarOption(
           show: true,
           position: 'right',
           fontFamily: MONO,
-          fontSize: 10,
-          color: tokens.fgSubtlest,
+          fontSize: 11,
+          color: tokens.fgSubtle,
           formatter: (p) => compactNumber(Number(p.value))
         }
       }

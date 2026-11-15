@@ -61,11 +61,11 @@ function UsageMiniChart({ points }: { points: AccountUsagePoint[] }): JSX.Elemen
       data: filled.map((p) => p.bucket.slice(5)),
       axisLine: { show: false },
       axisTick: { show: false },
-      axisLabel: { color: tokens.fgSubtlest, fontSize: 9, hideOverlap: true }
+      axisLabel: { color: tokens.fgSubtlest, fontSize: 10, hideOverlap: true }
     },
     yAxis: {
       type: 'value',
-      axisLabel: { color: tokens.fgSubtlest, fontSize: 9, formatter: (v: number) => compactNumber(v), hideOverlap: true },
+      axisLabel: { color: tokens.fgSubtlest, fontSize: 10, formatter: (v: number) => compactNumber(v), hideOverlap: true },
       splitLine: { lineStyle: { color: tokens.hairline, type: 'dashed' } }
     },
     series: [

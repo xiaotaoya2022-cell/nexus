@@ -4,7 +4,6 @@ import {
   app,
   BrowserWindow,
   Menu,
-  nativeImage,
   nativeTheme,
   Notification,
   powerSaveBlocker,
@@ -25,6 +24,7 @@ import { DshBridge } from './modules/dsh/bridge'
 import { CockpitBridge } from './modules/cockpit/bridge'
 import { QuotaEngine } from './modules/quotas/engine'
 import { logger } from './modules/shared/logger'
+import { initTrayAppearance, type TrayAppearanceController } from './tray-icon'
 import { PLATFORM_INTEGRATIONS } from './modules/quotas/platforms/registry'
 import { RemoteServer } from './modules/remote/server'
 import { NodeIdentityService } from './modules/mesh/identity'
@@ -50,6 +50,7 @@ let sync: SyncService | null = null
 let meshClient: MeshClient | null = null
 let remoteServer: RemoteServer | null = null
 let tray: Tray | null = null
+let trayAppearance: TrayAppearanceController | null = null
 let isQuitting = false
 let closeToTrayCheck: (() => boolean) | null = null
 let onTrayStateRefresh: (() => void) | null = null
@@ -88,25 +89,6 @@ function resolveIconPath(): string {
   }
   logger.warn('icon.missing', { candidates })
   return candidates[0]
-}
-
-/** 加载托盘图标：按托盘 DPI 取 16px 最清晰层；加载失败/空图走品牌色兜底，绝不空白。 */
-function loadTrayIcon(): Electron.NativeImage {
-  const iconPath = resolveIconPath()
-  let img = existsSync(iconPath) ? nativeImage.createFromPath(iconPath) : nativeImage.createEmpty()
-  if (img.isEmpty()) {
-    logger.error('icon.tray_load_failed', { iconPath })
-    img = nativeImage.createFromDataURL(FALLBACK_TRAY_ICON_DATA_URL)
-  } else {
-    img = img.resize({ width: 16, height: 16 })
-  }
-  logger.info('icon.tray_loaded', {
-    path: iconPath,
-    empty: img.isEmpty(),
-    w: img.getSize().width,
-    h: img.getSize().height
-  })
-  return img
 }
 
 function createWindow(): void {
@@ -469,6 +451,7 @@ app.whenReady()
   const refreshTray = (): void => {
     if (!tray) return
     try {
+      trayAppearance?.maybeRefresh()
       const todayTokens = query.getTodayTokensFast()
       const meshSuffix =
         latestMeshOnline && latestMeshOnline.total > 1
@@ -520,7 +503,8 @@ app.whenReady()
 
   if (!process.env.NEXUS_CAPTURE) {
     try {
-      tray = new Tray(loadTrayIcon())
+      trayAppearance = initTrayAppearance(() => tray, resolveIconPath(), FALLBACK_TRAY_ICON_DATA_URL)
+      tray = new Tray(trayAppearance.initialImage)
       tray.on('click', () => {
         if (!mainWindow) {
           createWindow()
@@ -620,6 +604,8 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   isQuitting = true
   try {
+    trayAppearance?.dispose()
+    trayAppearance = null
     tray?.destroy()
     tray = null
   } catch {

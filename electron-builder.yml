@@ -12,6 +12,7 @@ files:
   # v0.2.42 及之前生产包 appPath 下无 build/icon.ico → 托盘 createEmpty() 空白
   - build/icon.ico
   - build/icon.png
+  - build/tray/**
 win:
   target:
     - target: nsis

@@ -25,9 +25,9 @@
   --nx-hover: rgba(255, 255, 255, 0.05);
   --nx-selected: rgba(255, 255, 255, 0.1);
 
-  --nx-foreground: #d4d4d4;
-  --nx-foreground-subtle: #d4d4d499;
-  --nx-foreground-subtlest: #d4d4d44d;
+  --nx-foreground: #e5e5e5;
+  --nx-foreground-subtle: rgba(229, 229, 229, 0.82);
+  --nx-foreground-subtlest: rgba(229, 229, 229, 0.64);
   --nx-foreground-inverse: #000000;
 
   --nx-border: rgba(255, 255, 255, 0.1);
@@ -79,9 +79,9 @@
   --nx-hover: rgba(13, 13, 13, 0.04);
   --nx-selected: rgba(13, 13, 13, 0.08);
 
-  --nx-foreground: #262626;
-  --nx-foreground-subtle: #26262699;
-  --nx-foreground-subtlest: #26262666;
+  --nx-foreground: #1a1a1a;
+  --nx-foreground-subtle: rgba(26, 26, 26, 0.78);
+  --nx-foreground-subtlest: rgba(26, 26, 26, 0.65);
   --nx-foreground-inverse: #ffffff;
 
   --nx-border: rgba(13, 13, 13, 0.1);
@@ -133,9 +133,9 @@
   --nx-hover: rgba(235, 241, 255, 0.045);
   --nx-selected: rgba(235, 241, 255, 0.09);
 
-  --nx-foreground: #edf0f7;
-  --nx-foreground-subtle: rgba(237, 240, 247, 0.64);
-  --nx-foreground-subtlest: rgba(237, 240, 247, 0.38);
+  --nx-foreground: #f3f6fc;
+  --nx-foreground-subtle: rgba(241, 245, 251, 0.82);
+  --nx-foreground-subtlest: rgba(241, 245, 251, 0.66);
   --nx-foreground-inverse: #0b0d12;
 
   --nx-border: rgba(235, 241, 255, 0.09);
@@ -186,9 +186,9 @@
   --nx-hover: rgba(18, 22, 28, 0.045);
   --nx-selected: rgba(18, 22, 28, 0.085);
 
-  --nx-foreground: #17191e;
-  --nx-foreground-subtle: rgba(23, 25, 30, 0.62);
-  --nx-foreground-subtlest: rgba(23, 25, 30, 0.4);
+  --nx-foreground: #111318;
+  --nx-foreground-subtle: rgba(17, 19, 24, 0.8);
+  --nx-foreground-subtlest: rgba(17, 19, 24, 0.66);
   --nx-foreground-inverse: #ffffff;
 
   --nx-border: rgba(23, 25, 30, 0.11);
@@ -273,10 +273,10 @@
   --color-heat-3: var(--nx-heat-3);
   --color-heat-4: var(--nx-heat-4);
 
-  /* 字号刻度：--ui-font-size 单旋钮。偏移取半像素，13.5 基准下各级仍为整数 px
-     （MEMORA §3.3 整数像素纪律），小字号整体上浮 1px 提升可读性 */
-  --text-ui-2xs: calc(var(--ui-font-size) - 4.5px);
-  --text-ui-xs: calc(var(--ui-font-size) - 3.5px);
+  /* 字号刻度：--ui-font-size 单旋钮（Porcelain 13px 与 Nexus 14px 的均值 13.5px）。
+     半像素偏移让派生刻度保持整数 px，2xs(10px)/xs(11px) 抬升一档以保障小字可读性 */
+  --text-ui-2xs: calc(var(--ui-font-size) - 3.5px);
+  --text-ui-xs: calc(var(--ui-font-size) - 2.5px);
   --text-ui-sm: calc(var(--ui-font-size) - 1.5px);
   --text-ui-caption: calc(var(--ui-font-size) - 0.5px);
   --text-ui-base: var(--ui-font-size);
@@ -516,11 +516,9 @@ body {
   background-image: linear-gradient(180deg, #ffffff 0%, #faf9f5 100%);
 }
 
+/* KPI 主数字双风格统一均值字号（Porcelain 15px / Nexus 21px → 18px），仅保留 Nexus 负字距微调 */
 .style-nexus .nx-kpi-val {
-  font-size: calc(var(--ui-font-size) + 7.5px);
-  font-weight: 600;
   letter-spacing: -0.025em;
-  line-height: 1.15;
 }
 
 .nx-only,
@@ -998,10 +996,10 @@ html.nx-cursor-global-host input::-webkit-search-cancel-button {
   --nx-hover: rgba(15, 23, 42, 0.045);
   --nx-selected: rgba(37, 99, 235, 0.1);
 
-  /* 文字阶梯：MEMORA text/muted/subtle 实色口径（高对比度纪律） */
+  /* 文字阶梯：MEMORA text/muted/subtle 实色口径（高对比度纪律，AA+ 可读） */
   --nx-foreground: #0f172a;
-  --nx-foreground-subtle: #475569;
-  --nx-foreground-subtlest: #64748b;
+  --nx-foreground-subtle: #334155;
+  --nx-foreground-subtlest: #475569;
   --nx-foreground-inverse: #f8fafc;
 
   /* 描边：Slate 200 主描边 / Slate 300 hover（MEMORA border/border-strong 原值） */
@@ -1058,8 +1056,8 @@ html.nx-cursor-global-host input::-webkit-search-cancel-button {
   --nx-selected: rgba(59, 130, 246, 0.16);
 
   --nx-foreground: #f8fafc;
-  --nx-foreground-subtle: rgba(203, 213, 225, 0.88);
-  --nx-foreground-subtlest: rgba(148, 163, 184, 0.78);
+  --nx-foreground-subtle: #cbd5e1;
+  --nx-foreground-subtlest: #a6b5c9;
   --nx-foreground-inverse: #0f172a;
 
   --nx-border: rgba(148, 163, 184, 0.17);
@@ -1109,8 +1107,8 @@ html.nx-cursor-global-host input::-webkit-search-cancel-button {
   background: #0f172a;
   border-bottom-color: #1e293b;
   --nx-foreground: #f8fafc;
-  --nx-foreground-subtle: rgba(203, 213, 225, 0.88);
-  --nx-foreground-subtlest: rgba(148, 163, 184, 0.9);
+  --nx-foreground-subtle: #cbd5e1;
+  --nx-foreground-subtlest: #a6b5c9;
   --nx-foreground-inverse: #0f172a;
   --nx-border: #1e293b;
   --nx-border-hover: #334155;
@@ -1146,9 +1144,12 @@ html.nx-cursor-global-host input::-webkit-search-cancel-button {
   box-shadow: 0 3px 14px rgba(2, 6, 23, 0.45);
 }
 
-/* 数字仪表：Bahnschrift + tabular-nums + 负字距（MEMORA 排版纪律，两种风格统一） */
+/* 数字仪表：Bahnschrift + tabular-nums + 负字距（两种风格统一均值 18px） */
 .nx-kpi-val {
   font-family: var(--nx-font-num);
+  font-size: calc(var(--ui-font-size) + 4.5px);
+  font-weight: 600;
+  line-height: 1.15;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.4px;
 }

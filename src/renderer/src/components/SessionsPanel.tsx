@@ -253,7 +253,7 @@ export function SessionsPanel({
                       </span>
                       {showOrigin && originLabel && (
                         <span
-                          className={`inline-flex max-w-[82px] shrink-0 items-center gap-1 rounded px-1 py-0.5 font-mono text-[9px] leading-none ${
+                          className={`inline-flex max-w-[82px] shrink-0 items-center gap-1 rounded px-1 py-0.5 font-mono text-[10px] leading-none ${
                             isRemote
                               ? 'border border-cobalt/30 bg-cobalt/12 text-cobalt'
                               : 'bg-surface text-foreground-subtlest'
