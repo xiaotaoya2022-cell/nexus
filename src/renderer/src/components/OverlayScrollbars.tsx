@@ -229,6 +229,9 @@ export function GlobalOverlayScrollbars(): JSX.Element {
   const [bars, setBars] = useState<BarMetrics[]>([])
   const [hoveredTrackKey, setHoveredTrackKey] = useState<string | null>(null)
   const [draggingKey, setDraggingKey] = useState<string | null>(null)
+  // bars 签名：MutationObserver/过渡结束联动触发的 sync 结果未变时不 setState，
+  // 避免刷新洪峰后的空转重渲染
+  const barsSigRef = useRef('')
 
   const candidatesRef = useRef<Set<HTMLElement>>(new Set())
   const scrollActivityRef = useRef<WeakMap<HTMLElement, number>>(new WeakMap())
@@ -285,7 +288,17 @@ export function GlobalOverlayScrollbars(): JSX.Element {
         }
       }
 
-      setBars(nextBars)
+      const sig = nextBars
+        .map(
+          (b) =>
+            `${b.key}:${b.axis}:${Math.round(b.trackLeft)},${Math.round(b.trackTop)},${Math.round(b.thumbOffset)},${Math.round(b.thumbLength)},${b.containerHovered ? 1 : 0},${b.recentlyScrolled ? 1 : 0},${Math.round(b.maxScroll)}`
+        )
+        .sort()
+        .join('|')
+      if (sig !== barsSigRef.current) {
+        barsSigRef.current = sig
+        setBars(nextBars)
+      }
 
       if (idleTimerRef.current !== null) {
         window.clearTimeout(idleTimerRef.current)

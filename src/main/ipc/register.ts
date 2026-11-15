@@ -500,7 +500,8 @@ export function registerIpc(deps: IpcDeps): void {
     return {
       // 只提供 dark/light 两档：'system' 在渲染层有时序歧义（红队 N-13），存量为 system 时归一为 dark
       theme: theme === 'light' ? 'light' : 'dark',
-      uiStyle: uiStyle === 'classic' ? 'classic' : 'nexus'
+      // 经典 ZCode（classic）已退役：存量值一律迁移到新默认 porcelain（渲染层同口径）
+      uiStyle: uiStyle === 'nexus' ? 'nexus' : 'porcelain'
     }
   }
 
@@ -512,7 +513,7 @@ export function registerIpc(deps: IpcDeps): void {
     return readSettings()
   })
   ipcMain.handle('nexus:setUiStyle', (_e, style: NonNullable<Settings['uiStyle']>): Settings => {
-    const normalized = style === 'classic' ? 'classic' : 'nexus'
+    const normalized = style === 'nexus' ? 'nexus' : 'porcelain'
     deps.store.setSetting('uiStyle', normalized)
     return readSettings()
   })

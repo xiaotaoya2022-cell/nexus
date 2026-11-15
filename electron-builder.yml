@@ -8,6 +8,10 @@ electronDist: node_modules/electron/dist
 files:
   - out/**
   - package.json
+  # 托盘/窗口图标随包发布：buildResources 目录默认不进 app 包，
+  # v0.2.42 及之前生产包 appPath 下无 build/icon.ico → 托盘 createEmpty() 空白
+  - build/icon.ico
+  - build/icon.png
 win:
   target:
     - target: nsis

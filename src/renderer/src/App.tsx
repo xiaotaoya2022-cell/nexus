@@ -69,7 +69,7 @@ import {
   relativeTime,
   shortDir
 } from './lib/format'
-import type { ExportFormat, NamedStat, RangeKey, SessionRow } from '@shared/types'
+import type { ExportFormat, NamedStat, RangeKey, SessionRow, UiStyle } from '@shared/types'
 
 export default function App(): JSX.Element {
   const activeView = useUi((s) => s.activeView)
@@ -113,7 +113,7 @@ export default function App(): JSX.Element {
     void (async () => {
       const s = await nexus.getSettings()
       useUi.getState().setTheme(s.theme)
-      useUi.getState().setUiStyle(s.uiStyle === 'classic' ? 'classic' : 'nexus')
+      useUi.getState().setUiStyle(s.uiStyle === 'nexus' ? 'nexus' : 'porcelain')
       const r = await nexus.getSavedRange()
       useUi.getState().setRange(r)
       const cr = await nexus.getCustomRange()
@@ -165,9 +165,9 @@ export default function App(): JSX.Element {
   const [themeEpoch, setThemeEpoch] = useState(0)
   useLayoutEffect(() => {
     const el = document.documentElement
-    el.classList.remove('theme-dark', 'theme-light', 'style-nexus', 'style-classic')
+    el.classList.remove('theme-dark', 'theme-light', 'style-nexus', 'style-porcelain')
     el.classList.add(theme === 'light' ? 'theme-light' : 'theme-dark')
-    el.classList.add(uiStyle === 'classic' ? 'style-classic' : 'style-nexus')
+    el.classList.add(uiStyle === 'nexus' ? 'style-nexus' : 'style-porcelain')
     setThemeEpoch((v) => v + 1)
   }, [theme, uiStyle])
 
@@ -271,7 +271,7 @@ export default function App(): JSX.Element {
     await nexus.setTheme(next)
   }
 
-  const changeUiStyle = async (next: 'nexus' | 'classic'): Promise<void> => {
+  const changeUiStyle = async (next: UiStyle): Promise<void> => {
     setUiStyle(next)
     await nexus.setUiStyle(next)
   }
@@ -518,7 +518,7 @@ export default function App(): JSX.Element {
         onPointerUp={(e) => finishHeaderDrag(e.currentTarget)}
         onPointerCancel={(e) => finishHeaderDrag(e.currentTarget)}
         onLostPointerCapture={(e) => finishHeaderDrag(e.currentTarget)}
-        className="relative flex h-12 shrink-0 select-none items-center gap-4 border-b border-border bg-panel px-4"
+        className="nx-topbar relative flex h-12 shrink-0 select-none items-center gap-4 border-b border-border bg-panel px-4"
       >
         <div className="flex items-center gap-2">
           {/* 标题栏品牌徽章：平面白底 + 轻阴影（PO 定稿：去立体感、留阴影） */}
@@ -701,8 +701,8 @@ export default function App(): JSX.Element {
               />
               {(
                 [
-                  ['nexus', t('settings.uiStyle.nexus')],
-                  ['classic', t('settings.uiStyle.classic')]
+                  ['porcelain', t('settings.uiStyle.porcelain')],
+                  ['nexus', t('settings.uiStyle.nexus')]
                 ] as const
               ).map(([id, label]) => (
                 <button
@@ -1339,7 +1339,7 @@ export default function App(): JSX.Element {
         theme={theme}
         onToggleTheme={() => void toggleTheme()}
         uiStyle={uiStyle}
-        onToggleUiStyle={() => void changeUiStyle(uiStyle === 'nexus' ? 'classic' : 'nexus')}
+        onToggleUiStyle={() => void changeUiStyle(uiStyle === 'nexus' ? 'porcelain' : 'nexus')}
         lang={getLang()}
         onToggleLang={() => {
           const next: Lang = getLang() === 'zh-CN' ? 'en' : 'zh-CN'

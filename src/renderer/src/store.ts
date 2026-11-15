@@ -26,6 +26,8 @@ interface UiState {
   agent: string | null
   theme: Settings['theme']
   uiStyle: UiStyle
+  /** 看板加载中（刷新动效窗口）：CustomCursor 据此临时归还系统光标，主线程再卡鼠标也可用 */
+  boardLoading: boolean
   sync: SyncProgress
   customRange: CustomRange | null
   pricingConfig: PricingConfig
@@ -37,6 +39,7 @@ interface UiState {
   setAgent: (a: string | null) => void
   setTheme: (t: Settings['theme']) => void
   setUiStyle: (s: UiStyle) => void
+  setBoardLoading: (b: boolean) => void
   setSync: (p: SyncProgress) => void
   setCustomRange: (r: CustomRange | null) => void
   setPricingConfig: (cfg: PricingConfig, bump?: boolean) => void
@@ -49,7 +52,8 @@ export const useUi = create<UiState>((set) => ({
   range: '7d',
   agent: null,
   theme: 'dark',
-  uiStyle: 'nexus',
+  uiStyle: 'porcelain',
+  boardLoading: false,
   sync: { phase: 'idle', agent: null, message: '', startedAt: 0, finishedAt: null, results: [] },
   customRange: null,
   pricingConfig: DEFAULT_PRICING_CONFIG,
@@ -61,6 +65,7 @@ export const useUi = create<UiState>((set) => ({
   setAgent: (agent) => set({ agent }),
   setTheme: (theme) => set({ theme }),
   setUiStyle: (uiStyle) => set({ uiStyle }),
+  setBoardLoading: (boardLoading) => set({ boardLoading }),
   setSync: (sync) => set({ sync }),
   setCustomRange: (customRange) => set({ customRange }),
   setPricingConfig: (pricingConfig, bump = false) => {

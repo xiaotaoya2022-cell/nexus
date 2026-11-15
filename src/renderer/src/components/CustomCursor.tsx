@@ -22,6 +22,7 @@ import {
   writeCursorSize,
   type CursorSizeOption
 } from '../lib/cursorConfig'
+import { useUi } from '../store'
 
 export type GlobalCursorMode = 'default' | 'interactive' | 'text'
 
@@ -72,7 +73,16 @@ const PANEL_HOST_CLASS = 'nx-cursor-host'
 const DEFAULT_SIZE = 12
 const INTERACTIVE_SIZE_MULTIPLIER = 2.5
 const RING_PROBE_COUNT = 12
-const SAMPLE_MIN_INTERVAL_MS = 24
+const SAMPLE_MIN_INTERVAL_MS = 32
+/** 空闲休眠：指针静止且弹簧收敛后停掉 rAF（此前常驻每帧空转是基线负载来源） */
+const CURSOR_IDLE_STOP_MS = 900
+const CURSOR_SETTLE_SPEED_EPS = 0.05
+/** 卡顿看门狗：rAF 帧间隔超过该值说明主线程刚被长任务卡死——
+    立即归还系统光标一段时间，保证任何主线程卡顿下鼠标都可见可用 */
+const CURSOR_STALL_DETECT_MS = 200
+const CURSOR_STALL_LIFT_MS = 900
+/** 看门狗心跳间隔：6Hz 定时器成本可忽略，换来空闲休眠期的卡顿感知 */
+const CURSOR_WATCHDOG_INTERVAL_MS = 160
 const TEXT_BEAM_WIDTH = 2
 const TEXT_BEAM_HEIGHT = 20
 const PRESS_SCALE = 0.82
@@ -220,6 +230,12 @@ export function GlobalSpringCursor({ size = DEFAULT_SIZE }: { size?: number }): 
     let prevRawX = 0
     let prevRawY = 0
     let hasPrevRaw = false
+    let idleDeadline = 0
+    // 原生光标接管（lift）：系统光标回归（合成器渲染，不受主线程卡顿影响），
+    // 弹簧点隐藏。两个来源：看板刷新窗口（boardLoading）与主线程卡顿看门狗。
+    let lifted = false
+    let boardLifted = false
+    let stallLiftUntil = 0
     const state = { x: 0, y: 0, vx: 0, vy: 0, tx: 0, ty: 0, seen: false }
 
     // 预解码极微透明 1×1 PNG 光标，确保首帧即命中缓存而不触发 SetCursor(NULL)
@@ -257,7 +273,7 @@ export function GlobalSpringCursor({ size = DEFAULT_SIZE }: { size?: number }): 
       const angle =
         mode !== 'text' && speed > 0.01 ? (Math.atan2(state.vy, state.vx) * 180) / Math.PI : 0
       const press = pressed ? PRESS_SCALE : 1
-      dot.style.opacity = state.seen && !deferred ? '1' : '0'
+      dot.style.opacity = state.seen && !deferred && !lifted ? '1' : '0'
       dot.style.transform =
         `translate3d(${state.x}px, ${state.y}px, 0) translate(-50%, -50%)` +
         (mode === 'text'
@@ -265,8 +281,40 @@ export function GlobalSpringCursor({ size = DEFAULT_SIZE }: { size?: number }): 
           : ` rotate(${angle}deg) scale(${(1 + stretch) * press}, ${(1 - stretch * 0.5) * press})`)
     }
 
+    /** 归还系统光标：摘掉全局隐藏类（原生指针由合成器渲染，主线程卡死也可用），弹簧点隐藏 */
+    const liftNative = (): void => {
+      if (lifted) return
+      lifted = true
+      root.classList.remove(GLOBAL_HOST_CLASS)
+      paint()
+    }
+
+    /** 恢复接管：重新隐藏系统光标；弹簧点吸附到当前指针位置立即显示，不出现"无指针"窗口 */
+    const restoreNative = (): void => {
+      if (!lifted) return
+      lifted = false
+      root.classList.add(GLOBAL_HOST_CLASS)
+      if (state.seen) {
+        state.x = state.tx
+        state.y = state.ty
+        state.vx = 0
+        state.vy = 0
+        paint()
+      }
+    }
+
+    const applyLiftState = (): void => {
+      const stalled = performance.now() < stallLiftUntil
+      if (boardLifted || stalled) {
+        liftNative()
+      } else {
+        restoreNative()
+      }
+    }
+
     const tick = (time: number): void => {
-      const dt = Math.min((time - lastTime) / 1000 || 0, MAX_DT)
+      const rawDt = time - lastTime
+      const dt = Math.min(rawDt / 1000 || 0, MAX_DT)
       lastTime = time
       if (dt > 0) {
         const tauMs = mode === 'text' ? TEXT_FOLLOW_TAU_MS : FOLLOW_TAU_MS
@@ -282,11 +330,23 @@ export function GlobalSpringCursor({ size = DEFAULT_SIZE }: { size?: number }): 
         state.vy += (rawVy - state.vy) * velSmooth
       }
       paint()
+      // 空闲休眠：无按压、静止超时且弹簧已收敛 → 停排帧（dot 保持最后姿态），
+      // 任意 pointermove/pointerdown 会重新 start()；主线程不再被常驻 rAF 空转
+      if (
+        !pressed &&
+        !lifted &&
+        performance.now() >= idleDeadline &&
+        Math.hypot(state.vx, state.vy) < CURSOR_SETTLE_SPEED_EPS
+      ) {
+        running = false
+        return
+      }
       rafId = requestAnimationFrame(tick)
     }
 
     const start = (): void => {
-      root.classList.add(GLOBAL_HOST_CLASS)
+      // lift（原生光标接管）期间不重新隐藏系统光标
+      if (!lifted) root.classList.add(GLOBAL_HOST_CLASS)
       if (running) return
       running = true
       lastTime = performance.now()
@@ -312,6 +372,33 @@ export function GlobalSpringCursor({ size = DEFAULT_SIZE }: { size?: number }): 
 
     // 挂载即接管全局指针隐藏类，避免首帧及组件显隐瞬间闪烁系统光标
     root.classList.add(GLOBAL_HOST_CLASS)
+
+    // 刷新窗口鼠标保证：boardLoading 一开始（重活尚未落地）就归还系统光标——
+    // 原生指针由 OS 合成器渲染，随后无论主线程被图表重建卡多久，鼠标都可见可点；
+    // loading 结束后弹簧点吸附回指针位置无缝接管。刷新机制与动效完全不动。
+    boardLifted = useUi.getState().boardLoading
+    if (boardLifted) liftNative()
+    const unsubBoard = useUi.subscribe((s, prev) => {
+      if (s.boardLoading === prev.boardLoading) return
+      boardLifted = s.boardLoading
+      applyLiftState()
+    })
+
+    // 卡顿看门狗（独立于弹簧 rAF——空闲休眠停帧后依然在岗，覆盖空闲期卡顿）：
+    // 低频心跳对时；心跳迟到说明主线程刚被长任务卡死 → 归还系统光标一段时间。
+    // 归还/恢复的判定也在这里收口，空闲休眠与看门狗互不依赖。
+    let stallWatchdogBeat = performance.now()
+    const stallWatchdog = window.setInterval(() => {
+      const now = performance.now()
+      if (now - stallWatchdogBeat > CURSOR_STALL_DETECT_MS + CURSOR_WATCHDOG_INTERVAL_MS) {
+        stallLiftUntil = now + CURSOR_STALL_LIFT_MS
+        liftNative()
+      }
+      stallWatchdogBeat = now
+      if (lifted && !boardLifted && now >= stallLiftUntil) {
+        restoreNative()
+      }
+    }, CURSOR_WATCHDOG_INTERVAL_MS)
 
     const pointElement = (px: number, py: number): Element | null => {
       if (typeof document.elementFromPoint === 'function') {
@@ -341,6 +428,7 @@ export function GlobalSpringCursor({ size = DEFAULT_SIZE }: { size?: number }): 
 
     const onPointerMove = (event: PointerEvent): void => {
       if (event.pointerType === 'touch') return
+      idleDeadline = performance.now() + CURSOR_IDLE_STOP_MS
       state.tx = event.clientX
       state.ty = event.clientY
       const wasSeen = state.seen
@@ -394,8 +482,10 @@ export function GlobalSpringCursor({ size = DEFAULT_SIZE }: { size?: number }): 
 
     const onPointerDown = (event: PointerEvent): void => {
       if (event.pointerType === 'touch') return
+      idleDeadline = performance.now() + CURSOR_IDLE_STOP_MS
       pressed = true
-      if (running) paint()
+      if (!running) start()
+      paint()
     }
 
     const onPointerPressEnd = (): void => {
@@ -417,6 +507,8 @@ export function GlobalSpringCursor({ size = DEFAULT_SIZE }: { size?: number }): 
     window.addEventListener('blur', onBlur)
     return () => {
       stop(true)
+      unsubBoard()
+      window.clearInterval(stallWatchdog)
       document.removeEventListener('pointermove', onPointerMove, true)
       document.removeEventListener('pointerdown', onPointerDown, true)
       window.removeEventListener('pointerup', onPointerPressEnd)
@@ -459,6 +551,7 @@ export function PanelSpringCursor({
     let rafId = 0
     let running = false
     let lastTime = 0
+    let idleDeadline = 0
     const state = { x: 0, y: 0, vx: 0, vy: 0, tx: 0, ty: 0, seen: false }
 
     const paint = (): void => {
@@ -479,6 +572,15 @@ export function PanelSpringCursor({
       state.x += state.vx * dt
       state.y += state.vy * dt
       paint()
+      // 空闲休眠：静止超时且弹簧收敛 → 停排帧；pointermove 会重新 start()
+      if (
+        performance.now() >= idleDeadline &&
+        Math.hypot(state.vx, state.vy) < CURSOR_SETTLE_SPEED_EPS &&
+        Math.hypot(state.tx - state.x, state.ty - state.y) < 0.5
+      ) {
+        running = false
+        return
+      }
       rafId = requestAnimationFrame(tick)
     }
 
@@ -505,6 +607,7 @@ export function PanelSpringCursor({
     }
     const onPointerMove = (event: PointerEvent): void => {
       if (event.pointerType === 'touch') return
+      idleDeadline = performance.now() + CURSOR_IDLE_STOP_MS
       if (!running) start()
       state.tx = event.clientX
       state.ty = event.clientY

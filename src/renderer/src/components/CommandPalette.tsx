@@ -51,7 +51,7 @@ export interface CommandPaletteProps {
   onSelectAgent: (agentId: string | null) => void
   theme: 'dark' | 'light'
   onToggleTheme: () => void
-  uiStyle: 'nexus' | 'classic'
+  uiStyle: 'nexus' | 'porcelain'
   onToggleUiStyle: () => void
   lang: Lang
   onToggleLang: () => void
@@ -193,9 +193,9 @@ export function CommandPalette({
         id: 'action.style',
         group: 'nav',
         label: t('cmdk.action.toggleStyle', {
-          current: uiStyle === 'nexus' ? 'Nexus Studio' : 'Classic'
+          current: uiStyle === 'nexus' ? 'Nexus Studio' : 'Porcelain'
         }),
-        keywords: 'style ui studio classic 风格 经典',
+        keywords: 'style ui studio porcelain 瓷昼 风格',
         icon: <SparkGlyph />,
         perform: () => onToggleUiStyle()
       },

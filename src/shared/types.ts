@@ -215,7 +215,8 @@ export interface SyncProgress {
   results: Array<{ agent: string; records: number; sessions: number; tools: number; error: string | null }>
 }
 
-export type UiStyle = 'nexus' | 'classic'
+/** 界面风格：porcelain（默认，源自 MEMORA 设计语言）| nexus（Nexus Studio）。classic 已退役，存量值由 IPC 层迁移。 */
+export type UiStyle = 'nexus' | 'porcelain'
 
 export type NodeKind = 'physical' | 'vmware' | 'hyperv' | 'wsl2' | 'vm' | 'mac' | 'linux'
 export type NodeRole = 'hub' | 'spoke'

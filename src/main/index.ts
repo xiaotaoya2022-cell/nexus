@@ -32,6 +32,7 @@ import { MeshClient } from './modules/mesh/client'
 import { MeshService } from './modules/mesh/service'
 import {
   parseHeadlessMeshArgs,
+  persistPairRequest,
   printHeadlessUsage,
   runHeadlessMeshAgent
 } from './modules/mesh/headless'
@@ -67,6 +68,47 @@ function remigrateCodexIfFlagged(store: NexusStore): void {
   logger.info('migration.codex_remigrated')
 }
 
+/** 兜底托盘图标（16×16 圆角品牌蓝方块）：资源全部缺失时也绝不让托盘空白 */
+const FALLBACK_TRAY_ICON_DATA_URL =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAMklEQVR4nGNgQAOqya//48Po6onWiNcgUjVjGEKRAeRqhhsyasCwMGDgUyJVMhMl2RkAiYkj35g9KRcAAAAASUVORK5CYII='
+
+/**
+ * 图标解析：开发态 appPath/build；打包态 icon 已随包发布进 asar（electron-builder files 含
+ * build/icon.ico），resourcesPath 兜底。全部缺失时 warn 并返回首候选（由调用方兜底图像）。
+ * v0.2.42 及之前生产包不含 build/icon.ico → createEmpty() → 托盘空白（本修复的根因）。
+ */
+function resolveIconPath(): string {
+  const candidates = [
+    join(app.getAppPath(), 'build', 'icon.ico'),
+    join(process.resourcesPath ?? '', 'icon.ico'),
+    join(process.resourcesPath ?? '', 'build', 'icon.ico')
+  ]
+  for (const p of candidates) {
+    if (existsSync(p)) return p
+  }
+  logger.warn('icon.missing', { candidates })
+  return candidates[0]
+}
+
+/** 加载托盘图标：按托盘 DPI 取 16px 最清晰层；加载失败/空图走品牌色兜底，绝不空白。 */
+function loadTrayIcon(): Electron.NativeImage {
+  const iconPath = resolveIconPath()
+  let img = existsSync(iconPath) ? nativeImage.createFromPath(iconPath) : nativeImage.createEmpty()
+  if (img.isEmpty()) {
+    logger.error('icon.tray_load_failed', { iconPath })
+    img = nativeImage.createFromDataURL(FALLBACK_TRAY_ICON_DATA_URL)
+  } else {
+    img = img.resize({ width: 16, height: 16 })
+  }
+  logger.info('icon.tray_loaded', {
+    path: iconPath,
+    empty: img.isEmpty(),
+    w: img.getSize().width,
+    h: img.getSize().height
+  })
+  return img
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1600,
@@ -75,15 +117,14 @@ function createWindow(): void {
     minHeight: 680,
     title: 'Nexus',
     // 应用图标：任务栏/Alt+Tab（安装包图标由 electron-builder 从 build/icon.ico 取）
-    icon: join(app.getAppPath(), 'build/icon.ico'),
-    backgroundColor:
-      process.env.NEXUS_CAPTURE && process.env.NEXUS_CAPTURE_STYLE === 'classic'
-        ? nativeTheme.shouldUseDarkColors
-          ? '#161616'
-          : '#f8f8f8'
-        : nativeTheme.shouldUseDarkColors
-          ? '#0b0d12'
-          : '#eceae3',
+    icon: resolveIconPath(),
+    backgroundColor: (() => {
+      const dark = nativeTheme.shouldUseDarkColors
+      const style = process.env.NEXUS_CAPTURE ? process.env.NEXUS_CAPTURE_STYLE : undefined
+      if (style === 'porcelain') return dark ? '#0b1120' : '#f1f5f9'
+      if (style === 'classic') return dark ? '#161616' : '#f8f8f8'
+      return dark ? '#0b0d12' : '#eceae3'
+    })(),
     autoHideMenuBar: true,
     show: false,
     // 无边框窗口：自绘顶栏 + 自绘窗口控制钮。
@@ -214,6 +255,11 @@ app.whenReady()
       if (help) {
         printHeadlessUsage()
       } else {
+        // --pair 只落盘到固定信箱（命令行污点终结）；网络连接由运行器从盘上配置发起
+        if (options.pairUri) {
+          persistPairRequest(options.pairUri, options.alias)
+          options.pairUri = undefined
+        }
         await runHeadlessMeshAgent(options)
       }
       powerSaveBlocker.stop(blocker)
@@ -474,9 +520,7 @@ app.whenReady()
 
   if (!process.env.NEXUS_CAPTURE) {
     try {
-      const iconPath = join(app.getAppPath(), 'build/icon.ico')
-      const iconImg = existsSync(iconPath) ? nativeImage.createFromPath(iconPath) : nativeImage.createEmpty()
-      tray = new Tray(iconImg)
+      tray = new Tray(loadTrayIcon())
       tray.on('click', () => {
         if (!mainWindow) {
           createWindow()

@@ -29,6 +29,32 @@ export interface DashboardData {
   sessions: SessionRow[]
 }
 
+/** 看板变化签名：覆盖看板全部数据切片（总量/分布/趋势双分组/热力图/工具/会话边界）。
+    60s 周期刷新数据无变化时跳过 setData —— data 引用稳定，全部图表 useMemo /
+    EChart effect 自动短路，主线程不再出现"无变化也全量重建 8 图"的长任务。 */
+function boardSignature(board: BoardData): string {
+  const sessions = board.sessions
+  const trendSig = (points: TrendPoint[]): string =>
+    points.map((p) => `${p.total}:${Object.values(p.series).join('.')}`).join(',')
+  return [
+    board.overview.totals.total,
+    board.overview.totals.requests,
+    board.overview.totals.estimatedCostUsd,
+    board.overview.sessionCount,
+    board.overview.toolCallCount,
+    board.byModel.map((m) => `${m.name}:${m.tokens}:${m.requests}`).join(','),
+    board.byAgent.map((a) => `${a.name}:${a.tokens}`).join(','),
+    board.byProject.map((p) => `${p.projectDir ?? ''}:${p.tokens}:${p.estimatedCostUsd}`).join(','),
+    trendSig(board.trendByModel),
+    trendSig(board.trendByAgent),
+    board.breakdown.map((b) => `${b.key}:${b.tokens}`).join(','),
+    board.heatmap.cells.map((c) => c.join(',')).join(';'),
+    board.tools.map((tool) => `${tool.tool}:${tool.count}`).join(','),
+    sessions.length,
+    sessions.length > 0 ? `${sessions[0].sessionId}:${sessions[0].updatedAt ?? 0}` : ''
+  ].join('|')
+}
+
 export function useDashboard(): {
   data: DashboardData | null
   agents: AgentInfo[]
@@ -51,11 +77,13 @@ export function useDashboard(): {
   const trendRef = useRef<BoardData | null>(null)
   const reloadRef = useRef<() => Promise<void>>(async () => {})
   const reloadSeq = useRef(0)
+  const boardSigRef = useRef('')
 
   const reload = useCallback(async (): Promise<void> => {
     // getCalendar 通道保留在 IPC 契约中备用，看板已改用 trend 呈现每日强度（红队 N-16）
     const seq = ++reloadSeq.current
     setLoading(true)
+    useUi.getState().setBoardLoading(true)
     try {
       const custom = range === 'custom' && customRange ? customRange : undefined
       const [board, agentInfos] = await Promise.all([
@@ -77,20 +105,29 @@ export function useDashboard(): {
       ])
       if (seq !== reloadSeq.current) return // 过期响应丢弃（竞态守卫）
       trendRef.current = board
-      setData({
-        overview: board.overview,
-        trend: trendGroup === 'model' ? board.trendByModel : board.trendByAgent,
-        byAgent: board.byAgent,
-        byModel: board.byModel,
-        byProject: board.byProject,
-        breakdown: board.breakdown,
-        heatmap: board.heatmap,
-        tools: board.tools,
-        sessions: board.sessions
-      })
+      // 签名门控：数据无变化时跳过 setData（data 引用稳定 → 图表全链路短路）。
+      // 60s 周期刷新在无新用量时不再触发 8 图全量重建（主线程长任务主源）。
+      const sig = boardSignature(board)
+      if (sig !== boardSigRef.current) {
+        boardSigRef.current = sig
+        setData({
+          overview: board.overview,
+          trend: trendGroup === 'model' ? board.trendByModel : board.trendByAgent,
+          byAgent: board.byAgent,
+          byModel: board.byModel,
+          byProject: board.byProject,
+          breakdown: board.breakdown,
+          heatmap: board.heatmap,
+          tools: board.tools,
+          sessions: board.sessions
+        })
+      }
       setAgents(agentInfos)
     } finally {
-      if (seq === reloadSeq.current) setLoading(false)
+      if (seq === reloadSeq.current) {
+        setLoading(false)
+        useUi.getState().setBoardLoading(false)
+      }
     }
   }, [range, agent, selectedNodeId, selectedProjectDir, trendGroup, customRange, pricingRevision])
 
