@@ -228,7 +228,7 @@ export function DateTimeInput({
             ref={popRef}
             data-no-drag=""
             style={{ position: 'fixed', left: `${pos.left}px`, top: `${pos.top}px`, width: 248, zIndex: 150 }}
-            className="nx-fade-in nx-card-elevated rounded-xl border border-border bg-card p-3 shadow-2xl"
+            className="nx-popover nx-fade-in nx-card-elevated rounded-xl border border-border bg-card p-3 shadow-2xl"
           >
             <div className="mb-2 flex items-center justify-between gap-1">
               <button
@@ -247,7 +247,7 @@ export function DateTimeInput({
                 ›
               </button>
             </div>
-            <div className="mb-1 grid grid-cols-7 text-center text-[10px] text-foreground-subtlest">
+            <div className="mb-1 grid grid-cols-7 text-center text-[11px] text-foreground-subtlest">
               {weekdays.map((w, idx) => (
                 <span key={idx}>{w}</span>
               ))}

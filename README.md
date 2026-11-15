@@ -6,7 +6,7 @@
   <sub>EVERY TOKEN FINDS ITS RECORD. ｜ 品牌理念：聚合 · 计量 · 留存 · 追溯</sub></p>
   <p>
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license"/>
-    <img src="https://img.shields.io/badge/version-v0.2.46-blue" alt="version"/>
+    <img src="https://img.shields.io/badge/version-v0.2.47-blue" alt="version"/>
     <img src="https://img.shields.io/badge/platform-Windows-lightgrey" alt="platform"/>
     <img src="https://img.shields.io/badge/privacy-纯本地-success" alt="privacy"/>
   </p>
@@ -151,7 +151,7 @@ NEXUS_DEBUG=1 npm run dev        # 转发渲染进程 console 到终端
 
 ## 治理
 
-- 文档同步：`docs/modules/index.md` + 各模块 md（v0.2.46 增量变更已覆盖主入口/样式与打包说明）。
+- 文档同步：`docs/modules/index.md` + 各模块 md（v0.2.47 增量变更已覆盖主入口/样式与打包说明）。
 - 红蓝对抗审计：AI 子代理循环审计直至通过，初版与 v2 升级验收分别见 `docs/reports/PROJECT_LAUNCH_REPORT.md`（v0.1.0）与 `docs/reports/ENHANCEMENT_REPORT.md`（v2.0）。
 - License：[MIT](LICENSE)。
 

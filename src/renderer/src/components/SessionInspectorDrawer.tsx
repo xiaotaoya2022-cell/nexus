@@ -84,7 +84,7 @@ export function SessionInspectorDrawer({
       <aside
         role="dialog"
         aria-label={t('inspector.title')}
-        className="nx-fade-in nx-card-elevated relative z-10 flex h-full w-full max-w-[460px] flex-col border-l border-border bg-card shadow-2xl"
+        className="nx-popover nx-fade-in nx-card-elevated relative z-10 flex h-full w-full max-w-[460px] flex-col border-l border-border bg-card shadow-2xl"
       >
         <header className="flex items-center justify-between gap-3 border-b border-border px-5 py-3.5">
           <div className="flex min-w-0 items-center gap-2.5">
@@ -98,7 +98,7 @@ export function SessionInspectorDrawer({
               <div className="flex items-center gap-1.5">
                 <span className="text-ui-xs font-medium text-foreground-subtle">{agentLabel}</span>
                 {cur.sourceNodeLabel && (
-                  <span className="rounded bg-surface px-1.5 py-0.5 text-[10px] text-foreground-subtlest">
+                  <span className="rounded bg-surface px-1.5 py-0.5 text-[11px] text-foreground-subtlest">
                     {cur.sourceNodeLabel}
                   </span>
                 )}
@@ -282,7 +282,7 @@ export function SessionInspectorDrawer({
                         className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-card px-2 py-1 font-mono text-[11px] text-foreground"
                       >
                         <span>{tl.tool}</span>
-                        <span className="rounded bg-surface px-1 text-[10px] tabular-nums text-signal">
+                        <span className="rounded bg-surface px-1 text-[11px] tabular-nums text-signal">
                           ×{tl.count}
                         </span>
                       </span>

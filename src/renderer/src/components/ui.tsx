@@ -134,7 +134,7 @@ export function PillSwitcher<T extends string>({
   onChange: (v: T) => void
 }): JSX.Element {
   return (
-    <div className="relative isolate flex h-7 items-center rounded-full bg-surface p-0.5">
+    <div className="relative isolate flex h-7 shrink-0 items-center rounded-full bg-surface p-0.5">
       <SlidingTabIndicator activeSelector='button[data-active="true"]' />
       {options.map((o) => {
         const active = value === o.key
@@ -144,7 +144,7 @@ export function PillSwitcher<T extends string>({
             type="button"
             data-active={active ? 'true' : undefined}
             onClick={() => onChange(o.key)}
-            className={`relative z-10 h-6 cursor-pointer rounded-full px-2.5 text-ui-sm transition-colors duration-150 ${
+            className={`relative z-10 h-6 shrink-0 cursor-pointer whitespace-nowrap rounded-full px-1.5 text-ui-xs transition-colors duration-150 lg:px-2 2xl:px-2.5 2xl:text-ui-sm ${
               active ? 'font-medium text-foreground' : 'text-foreground-subtle hover:text-foreground'
             }`}
           >
@@ -184,7 +184,7 @@ export function IconButton({
       title={title}
       onClick={onClick}
       style={style}
-      className="flex size-7 items-center justify-center rounded-lg text-foreground-subtle transition-colors duration-150 hover:bg-hover hover:text-foreground"
+      className="flex size-7 shrink-0 items-center justify-center rounded-lg text-foreground-subtle transition-colors duration-150 hover:bg-hover hover:text-foreground"
     >
       <span className={spinning ? 'nx-spin' : undefined}>{children}</span>
     </button>
@@ -331,7 +331,7 @@ export function NexusSelect<T extends string | number>({
               width: `${menuPos.width}px`,
               zIndex: 140
             }}
-            className="nx-fade-in nx-card-elevated max-h-56 overflow-y-auto rounded-lg border border-border bg-card p-1 shadow-xl"
+            className="nx-popover nx-fade-in nx-card-elevated max-h-56 overflow-y-auto rounded-lg border border-border bg-card p-1 shadow-xl"
           >
             {options.map((opt) => {
               const selected = opt.value === value

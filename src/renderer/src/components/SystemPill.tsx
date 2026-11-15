@@ -50,22 +50,22 @@ export function SystemPill(): JSX.Element {
   const mainDisk = snap?.disks.filter((d) => d.mount.match(/^[C-F]:$/i))[0] ?? snap?.disks[0]
 
   return (
-    <div className="relative">
+    <div className="relative shrink-0">
       <button
         type="button"
         title={t('system.detail')}
         onClick={() => setOpen((v) => !v)}
-        className="flex h-7 items-center gap-2 rounded-full bg-surface px-3 font-mono text-ui-xs tabular-nums text-foreground-subtle transition-colors duration-150 hover:text-foreground"
+        className="flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-surface px-2.5 font-mono text-ui-xs tabular-nums text-foreground-subtle transition-colors duration-150 hover:text-foreground 2xl:gap-2 2xl:px-3"
       >
         {snap == null ? (
           <span>{t('system.collecting')}</span>
         ) : (
           <>
             <span title="CPU">CPU {snap.cpu.loadPercent}%</span>
-            <span className="text-hairline">|</span>
-            <span title={t('system.memory')}>{t('system.memoryPct', { pct: snap.memory.usedPercent })}</span>
-            <span className="text-hairline">|</span>
-            <span title={t('system.netRate')}>
+            <span className="hidden text-hairline xl:inline">|</span>
+            <span className="hidden xl:inline" title={t('system.memory')}>{t('system.memoryPct', { pct: snap.memory.usedPercent })}</span>
+            <span className="hidden text-hairline 2xl:inline">|</span>
+            <span className="hidden 2xl:inline" title={t('system.netRate')}>
               ↓{fmtRate(snap.network.rxBytesPerSec)} ↑{fmtRate(snap.network.txBytesPerSec)}
             </span>
           </>
@@ -74,7 +74,7 @@ export function SystemPill(): JSX.Element {
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="nx-fade-in absolute right-0 top-9 z-20 w-96 rounded-xl border border-border bg-card p-4">
+          <div className="nx-popover nx-fade-in nx-card-elevated absolute right-0 top-9 z-20 w-96 rounded-xl border border-border bg-card p-4 text-foreground">
             <div className="mb-3 flex items-baseline justify-between">
               <span className="text-ui-base font-medium">{t('system.title')}</span>
               <span className="font-mono text-ui-xs tabular-nums text-foreground-subtlest">

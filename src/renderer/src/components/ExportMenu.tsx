@@ -42,7 +42,7 @@ export function ExportMenu({ scopeLabel, onExport }: ExportMenuProps): JSX.Eleme
   }, [open])
 
   return (
-    <div className="relative" data-no-drag="">
+    <div className="relative shrink-0" data-no-drag="">
       <button
         type="button"
         data-export-trigger=""
@@ -50,7 +50,7 @@ export function ExportMenu({ scopeLabel, onExport }: ExportMenuProps): JSX.Eleme
         aria-expanded={open}
         title={t('header.action.exportPng')}
         onClick={() => setOpen((v) => !v)}
-        className={`flex h-7 items-center gap-0.5 rounded-lg px-1.5 text-foreground-subtle transition-colors duration-150 hover:bg-hover hover:text-foreground ${
+        className={`flex h-7 shrink-0 items-center gap-0.5 whitespace-nowrap rounded-lg px-1.5 text-foreground-subtle transition-colors duration-150 hover:bg-hover hover:text-foreground ${
           open ? 'bg-selected text-foreground' : ''
         }`}
       >
@@ -66,11 +66,11 @@ export function ExportMenu({ scopeLabel, onExport }: ExportMenuProps): JSX.Eleme
           <div
             role="menu"
             data-export-menu=""
-            className="nx-fade-in nx-card-elevated absolute right-0 top-9 z-30 w-72 overflow-hidden rounded-xl border border-border bg-card p-1.5"
+            className="nx-popover nx-fade-in nx-card-elevated absolute right-0 top-9 z-30 w-80 overflow-hidden rounded-xl border border-border bg-card p-2 text-foreground"
           >
-            <div className="flex items-center justify-between px-2.5 pb-1.5 pt-1 text-[11px] font-medium text-foreground-subtle">
+            <div className="flex items-center justify-between gap-2 px-2.5 pb-2 pt-1 text-ui-xs font-medium text-foreground">
               <span>{t('export.title')}</span>
-              <span className="truncate max-w-[160px] text-ui-xs font-normal text-foreground-subtlest" title={scopeLabel}>
+              <span className="max-w-[170px] truncate text-ui-xs font-normal text-foreground-subtle" title={scopeLabel}>
                 {scopeLabel}
               </span>
             </div>
@@ -87,12 +87,12 @@ export function ExportMenu({ scopeLabel, onExport }: ExportMenuProps): JSX.Eleme
                   }}
                   className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 hover:bg-hover"
                 >
-                  <span className="mt-0.5 inline-flex h-5 w-9 shrink-0 items-center justify-center rounded border border-hairline bg-surface font-mono text-[10px] font-semibold tracking-wider text-signal">
+                  <span className="mt-0.5 inline-flex h-5 w-10 shrink-0 items-center justify-center rounded border border-border bg-signal-soft font-mono text-[11px] font-semibold tracking-wider text-signal">
                     {opt.ext}
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block text-ui-sm font-medium text-foreground">{t(opt.titleKey)}</span>
-                    <span className="block text-[11px] leading-snug text-foreground-subtlest">
+                    <span className="block text-ui-xs leading-snug text-foreground-subtle">
                       {t(opt.descKey)}
                     </span>
                   </span>

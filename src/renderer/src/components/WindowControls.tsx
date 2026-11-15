@@ -6,7 +6,7 @@ import type { JSX } from 'react'
 import { nexus } from '../lib/api'
 import { t, useLang } from '../i18n'
 
-const BTN = 'flex h-12 w-12 items-center justify-center text-foreground-subtle transition-colors duration-150'
+const BTN = 'flex h-12 w-8 xl:w-9 2xl:w-11 shrink-0 items-center justify-center text-foreground-subtle transition-colors duration-150'
 
 function MinIcon(): JSX.Element {
   return (

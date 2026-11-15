@@ -526,7 +526,7 @@ export function CommandPalette({
               {groupedSections.map((group) => (
                 <section key={group.id}>
                   {group.title && (
-                    <div className="px-2.5 pb-1 text-[10px] font-medium tracking-wider text-foreground-subtlest">
+                    <div className="px-2.5 pb-1 text-[11px] font-medium tracking-wider text-foreground-subtle">
                       {group.title}
                     </div>
                   )}
@@ -559,7 +559,7 @@ export function CommandPalette({
                             )}
                           </span>
                           {entry.badge && (
-                            <span className="shrink-0 rounded bg-surface px-1.5 py-0.5 font-mono text-[10px] text-foreground-subtle">
+                            <span className="shrink-0 rounded bg-surface px-1.5 py-0.5 font-mono text-[11px] text-foreground-subtle">
                               {entry.badge}
                             </span>
                           )}
@@ -574,7 +574,7 @@ export function CommandPalette({
         </div>
 
         {/* 底部快捷键提示栏 */}
-        <footer className="flex items-center justify-between border-t border-hairline bg-surface/65 px-4 py-2 font-mono text-[10px] text-foreground-subtlest">
+        <footer className="flex items-center justify-between border-t border-hairline bg-surface/65 px-4 py-2 font-mono text-[11px] text-foreground-subtle">
           <div className="flex items-center gap-3">
             <span>{t('cmdk.hint.navigate')}</span>
             <span>{t('cmdk.hint.execute')}</span>

@@ -225,14 +225,14 @@ export function AccountPanel(): JSX.Element {
   }
 
   return (
-    <div className="relative">
+    <div className="relative shrink-0">
       <IconButton title={t('account.title')} onClick={() => setOpen((v) => !v)}>
         <WalletIcon />
       </IconButton>
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="nx-fade-in absolute right-0 top-9 z-20 w-[30rem] rounded-xl border border-border bg-card p-4">
+          <div className="nx-popover nx-fade-in nx-card-elevated absolute right-0 top-9 z-20 w-[30rem] rounded-xl border border-border bg-card p-4 text-foreground">
             <div className="mb-2 flex items-center justify-between">
               <span className="text-ui-base font-medium">{t('account.title')}</span>
               <IconButton title={t('account.refresh')} onClick={() => void refresh()} spinning={refreshing}>

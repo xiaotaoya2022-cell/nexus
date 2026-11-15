@@ -839,7 +839,7 @@ export function CursorSettingsSection(): JSX.Element {
                     style={{ width: `${opt}px`, height: `${opt}px` }}
                   />
                 </span>
-                <span className="font-mono text-[10px] tabular-nums">{opt}px</span>
+                <span className="font-mono text-[11px] font-medium tabular-nums">{opt}px</span>
               </button>
             )
           })}

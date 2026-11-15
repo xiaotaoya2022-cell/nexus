@@ -518,32 +518,32 @@ export default function App(): JSX.Element {
         onPointerUp={(e) => finishHeaderDrag(e.currentTarget)}
         onPointerCancel={(e) => finishHeaderDrag(e.currentTarget)}
         onLostPointerCapture={(e) => finishHeaderDrag(e.currentTarget)}
-        className="nx-topbar relative flex h-12 shrink-0 select-none items-center gap-4 border-b border-border bg-panel px-4"
+        className="nx-topbar relative flex h-12 shrink-0 select-none items-center gap-1 border-b border-border bg-panel px-2 xl:gap-2 xl:px-2.5 2xl:gap-3 2xl:px-4"
       >
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
           {/* 标题栏品牌徽章：平面白底 + 轻阴影（PO 定稿：去立体感、留阴影） */}
           <span
             aria-hidden
-            className="flex size-6 items-center justify-center overflow-hidden rounded-md bg-white shadow-[0_1px_3px_rgba(0,0,0,0.18)]"
+            className="flex size-6 shrink-0 items-center justify-center overflow-hidden rounded-md bg-white shadow-[0_1px_3px_rgba(0,0,0,0.18)]"
           >
             <img src={nexusMark} alt="" className="h-auto w-4" draggable={false} />
           </span>
-          <span className="text-ui-base font-medium">Nexus</span>
-          <span className="hidden text-ui-sm text-foreground-subtlest xl:inline">{t('app.subtitle')}</span>
+          <span className="text-ui-base font-medium text-foreground">Nexus</span>
+          <span className="hidden whitespace-nowrap text-ui-sm text-foreground-subtlest 2xl:inline">{t('app.subtitle')}</span>
         </div>
 
         {/* 一级视图切换：总控看板 ↔ 算力组网 Mesh */}
         <nav
           aria-label="Primary views"
           data-no-drag=""
-          className="relative isolate flex h-7 items-center rounded-full bg-surface p-0.5"
+          className="relative isolate flex h-7 shrink-0 items-center rounded-full bg-surface p-0.5"
         >
           <SlidingTabIndicator activeSelector='button[data-active="true"]' />
           <button
             type="button"
             data-active={activeView === 'board' ? 'true' : undefined}
             onClick={() => setActiveView('board')}
-            className={`relative z-10 flex h-6 cursor-pointer items-center gap-1.5 rounded-full px-2.5 text-ui-xs transition-colors duration-150 ${
+            className={`relative z-10 flex h-6 shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full px-2 text-ui-xs transition-colors duration-150 2xl:px-2.5 ${
               activeView === 'board'
                 ? 'font-medium text-foreground'
                 : 'text-foreground-subtle hover:text-foreground'
@@ -555,16 +555,16 @@ export default function App(): JSX.Element {
             type="button"
             data-active={activeView === 'mesh' ? 'true' : undefined}
             onClick={() => setActiveView('mesh')}
-            className={`relative z-10 flex h-6 cursor-pointer items-center gap-1.5 rounded-full px-2.5 text-ui-xs transition-colors duration-150 ${
+            className={`relative z-10 flex h-6 shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full px-2 text-ui-xs transition-colors duration-150 2xl:px-2.5 ${
               activeView === 'mesh'
                 ? 'font-medium text-foreground'
                 : 'text-foreground-subtle hover:text-foreground'
             }`}
           >
-            <MeshGlyph className="size-3.5 text-cobalt" />
+            <MeshGlyph className="size-3.5 shrink-0 text-cobalt" />
             <span>{t('nav.mesh')}</span>
             {meshStatus && (
-              <span className="rounded-full bg-card px-1.5 font-mono text-[10px] leading-4 tabular-nums text-foreground-subtle">
+              <span className="rounded-full bg-secondary px-1.5 font-mono text-[10px] leading-4 tabular-nums text-foreground-subtle">
                 {multiNode ? `${meshOnlineCount}/${meshStatus.nodes.length}` : meshOnlineCount}
               </span>
             )}
@@ -576,19 +576,19 @@ export default function App(): JSX.Element {
           data-no-drag=""
           onClick={() => setCmdkOpen(true)}
           title={`${t('cmdk.button')} (Ctrl+K)`}
-          className="hidden h-7 cursor-pointer items-center gap-1.5 rounded-full border border-hairline bg-surface px-2.5 text-ui-xs text-foreground-subtle transition-colors duration-150 hover:border-border hover:bg-hover hover:text-foreground sm:flex"
+          className="hidden h-7 shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full border border-hairline bg-surface px-1.5 text-ui-xs text-foreground-subtle transition-colors duration-150 hover:border-border hover:bg-hover hover:text-foreground sm:flex xl:px-2.5"
         >
-          <span>{t('cmdk.button')}</span>
-          <kbd className="rounded bg-card px-1 py-0.5 font-mono text-[10px] leading-none text-foreground-subtlest">
+          <span className="hidden 2xl:inline">{t('cmdk.button')}</span>
+          <kbd className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[10px] leading-none text-foreground-subtle">
             Ctrl K
           </kbd>
         </button>
-        <div className="flex-1" />
+        <div className="min-w-0 flex-1" />
         {sync.phase === 'running' && (
-          <span className="text-ui-xs text-foreground-subtle">{t('header.syncing')}</span>
+          <span className="hidden shrink-0 whitespace-nowrap text-ui-xs text-foreground-subtle lg:inline">{t('header.syncing')}</span>
         )}
         {activeView === 'board' && (
-          <div className="relative" data-no-drag="">
+          <div className="relative shrink-0" data-no-drag="">
             <PillSwitcher
               options={[
                 ...RANGE_OPTIONS.map((o) => ({ ...o, label: t(`range.${o.key}`) })),
@@ -608,7 +608,7 @@ export default function App(): JSX.Element {
             {customPickerOpen && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setCustomPickerOpen(false)} />
-                <div className="nx-fade-in absolute right-0 top-9 z-20 w-80 rounded-xl border border-border bg-card p-4">
+                <div className="nx-popover nx-fade-in nx-card-elevated absolute right-0 top-9 z-20 w-80 rounded-xl border border-border bg-card p-4 text-foreground">
                   <div className="mb-3 text-ui-base font-medium">{t('custom.title')}</div>
                   <label className="mb-1 block text-ui-xs text-foreground-subtle">{t('custom.start')}</label>
                   <DateTimeInput
@@ -645,37 +645,42 @@ export default function App(): JSX.Element {
           </div>
         )}
         <SystemPill />
-        <AccountPanel />
-        <IconButton title={t('header.action.syncNow')} onClick={() => void nexus.syncNow()} spinning={sync.phase === 'running'}>
-          <RefreshIcon />
-        </IconButton>
-        <IconButton title={theme === 'dark' ? t('header.action.toggleLight') : t('header.action.toggleDark')} onClick={() => void toggleTheme()}>
-          {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
-        </IconButton>
-        <ExportMenu scopeLabel={exportScopeLabel} onExport={handleExport} />
-        {activeView === 'board' && (
-          <button
-            type="button"
-            data-no-drag=""
-            title={t('header.action.sessions')}
-            onClick={() => setSessionsDrawerOpen((v) => !v)}
-            className="flex h-7 items-center gap-1 rounded-lg px-2 text-ui-xs text-foreground-subtle transition-colors duration-150 hover:bg-hover hover:text-foreground 2xl:hidden"
-          >
-            <span>{t('sessions.title')}</span>
-            <span className="rounded-full bg-surface px-1.5 font-mono text-[10px] tabular-nums text-foreground">
-              {data?.sessions.length ?? 0}
-            </span>
-          </button>
-        )}
-        <IconButton title={t('header.action.settings')} onClick={() => void openSettings()}>
-          <GearIcon />
-        </IconButton>
+        <div className="flex shrink-0 items-center gap-0.5 xl:gap-1" data-no-drag="">
+          <AccountPanel />
+          <IconButton title={t('header.action.syncNow')} onClick={() => void nexus.syncNow()} spinning={sync.phase === 'running'}>
+            <RefreshIcon />
+          </IconButton>
+          <IconButton title={theme === 'dark' ? t('header.action.toggleLight') : t('header.action.toggleDark')} onClick={() => void toggleTheme()}>
+            {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
+          </IconButton>
+          <ExportMenu scopeLabel={exportScopeLabel} onExport={handleExport} />
+          {activeView === 'board' && (
+            <button
+              type="button"
+              data-no-drag=""
+              title={t('header.action.sessions')}
+              onClick={() => setSessionsDrawerOpen((v) => !v)}
+              className="flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-lg px-1.5 text-ui-xs text-foreground-subtle transition-colors duration-150 hover:bg-hover hover:text-foreground xl:px-2 2xl:hidden"
+            >
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="xl:hidden" aria-hidden>
+                <path d="M3 4.5h10M3 8h10M3 11.5h6" />
+              </svg>
+              <span className="hidden xl:inline">{t('sessions.title')}</span>
+              <span className="rounded-full bg-surface px-1.5 font-mono text-[10px] tabular-nums text-foreground">
+                {data?.sessions.length ?? 0}
+              </span>
+            </button>
+          )}
+          <IconButton title={t('header.action.settings')} onClick={() => void openSettings()}>
+            <GearIcon />
+          </IconButton>
+        </div>
         <WindowControls />
         {settingsOpen && (
           <>
             <div className="fixed inset-0 z-10" onClick={() => setSettingsOpen(false)} />
             <div
-              className="nx-fade-in nx-card-elevated absolute right-3 top-12 z-20 max-h-[84vh] w-[360px] overflow-y-auto rounded-xl border border-border bg-card p-4"
+              className="nx-popover nx-fade-in nx-card-elevated absolute right-3 top-12 z-20 max-h-[84vh] w-[368px] overflow-y-auto rounded-xl border border-border bg-card p-4 text-foreground"
               role="dialog"
             >
             <div className="mb-3 text-ui-base font-medium">{t('settings.title')}</div>

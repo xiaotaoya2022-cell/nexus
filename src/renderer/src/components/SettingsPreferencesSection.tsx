@@ -168,12 +168,12 @@ export function SettingsPreferencesSection({
         </label>
       </div>
       <div className="mt-1 flex items-center justify-between gap-2">
-        <span className="text-[10px] text-foreground-subtlest">{t('settings.alerts.offHint')}</span>
+        <span className="text-[11px] text-foreground-subtlest">{t('settings.alerts.offHint')}</span>
         <button
           type="button"
           data-save-alerts=""
           onClick={() => void persistPrefs()}
-          className="shrink-0 rounded-md bg-secondary px-2 py-0.5 text-[11px] text-foreground transition-colors duration-150 hover:bg-surface-hover"
+          className="shrink-0 rounded-md bg-secondary px-2 py-0.5 text-[11px] font-medium text-foreground transition-colors duration-150 hover:bg-surface-hover"
         >
           {t('custom.apply')}
         </button>
@@ -255,7 +255,7 @@ export function SettingsPreferencesSection({
           <button
             type="button"
             onClick={() => addOverride(true)}
-            className="rounded-md bg-surface px-1.5 py-0.5 text-[10px] text-foreground-subtle transition-colors hover:bg-hover hover:text-foreground"
+            className="rounded-md bg-surface px-2 py-0.5 text-[11px] font-medium text-foreground-subtle transition-colors hover:bg-hover hover:text-foreground"
           >
             {t('settings.pricing.presetLocal')}
           </button>
@@ -263,7 +263,7 @@ export function SettingsPreferencesSection({
             type="button"
             data-add-pricing-rule=""
             onClick={() => addOverride(false)}
-            className="rounded-md bg-secondary px-1.5 py-0.5 text-[10px] text-foreground transition-colors hover:bg-surface-hover"
+            className="rounded-md bg-secondary px-2 py-0.5 text-[11px] font-medium text-foreground transition-colors hover:bg-surface-hover"
           >
             {t('settings.pricing.addRule')}
           </button>
@@ -334,7 +334,7 @@ export function SettingsPreferencesSection({
                       onChange={(e) =>
                         updateOverride(rule.id, { input: Math.max(0, Number(e.target.value) || 0) })
                       }
-                      className="h-6 rounded border border-border bg-card px-1 font-mono text-[10px] text-foreground"
+                      className="h-6 rounded border border-border bg-card px-1 font-mono text-[11px] text-foreground"
                     />
                     <input
                       type="number"
@@ -345,7 +345,7 @@ export function SettingsPreferencesSection({
                       onChange={(e) =>
                         updateOverride(rule.id, { output: Math.max(0, Number(e.target.value) || 0) })
                       }
-                      className="h-6 rounded border border-border bg-card px-1 font-mono text-[10px] text-foreground"
+                      className="h-6 rounded border border-border bg-card px-1 font-mono text-[11px] text-foreground"
                     />
                     <input
                       type="number"
@@ -356,7 +356,7 @@ export function SettingsPreferencesSection({
                       onChange={(e) =>
                         updateOverride(rule.id, { cacheRead: Math.max(0, Number(e.target.value) || 0) })
                       }
-                      className="h-6 rounded border border-border bg-card px-1 font-mono text-[10px] text-foreground"
+                      className="h-6 rounded border border-border bg-card px-1 font-mono text-[11px] text-foreground"
                     />
                   </div>
                 )}
