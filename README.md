@@ -110,9 +110,22 @@ Nexus 补上了市面上工具没做的三件事：
 
 ## 路线图
 
+### 已完成里程碑（对照 git 历史）
+
+- ✅ **v0.1.0** —— 看板应用落地：适配器 ×5 + `node:sqlite` 存储 + ECharts 看板，红蓝审计放行
+- ✅ **v0.2.0** —— 账号级真实消耗（DeepSeek 官方账单全历史）+ 国内/国际双登录 + DSH 接入 + 无标题栏自绘窗口
+- ✅ **v0.2.24** —— 15 Agent 扩面（MiMo / Muse / Cline / Roo / Kilo / Gemini / Qwen）+ i18n 双语 + 自定义时间范围 + 多开感知 + Antigravity 配额
+- ✅ **v0.2.39–42** —— Nexus Mesh 算力组网 + 多格式导出中心 + 全局滚动条 / 光标修复
+- ✅ **v2** —— 远程访问（WSS 配对，令牌永不上线）+ Android apk + Tailscale 内嵌引擎（tsnet）+ 账号配额引擎（Codex / CodeBuddy CN / WorkBuddy / Qoder OAuth + 告警阈值 + DPAPI 链）+ VPN 内嵌入包（libwg-go.so）
+- ✅ **v0.2.44–45** —— Porcelain 瓷昼主题重做（MEMORA 设计语言）+ 托盘打包级根因修复 + 刷新鼠标可用性根治 + 全局方案 A 字体
+
+### 待办
+
 - [ ] 通用 JSONL 历史导入（跨工具迁移）
 - [ ] macOS 支持（当前 Windows 优先，目标用户画像重合）
 - [ ] Trae 配额端点移植（cockpit 源码已定位 trae_account* 模块）
+- [ ] Android VPN 内嵌开关暴露（libwg-go.so 已入包，UI 开关待接）
+- [ ] ZCode 实例管理器深化（运行态进程枚举 + 无头派生）
 - [ ] Demo 数据动图
 
 ## 开发
