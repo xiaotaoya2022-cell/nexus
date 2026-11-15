@@ -72,7 +72,10 @@ const PANEL_HOST_CLASS = 'nx-cursor-host'
 const DEFAULT_SIZE = 12
 const INTERACTIVE_SIZE_MULTIPLIER = 2.5
 const RING_PROBE_COUNT = 12
-const SAMPLE_MIN_INTERVAL_MS = 24
+const SAMPLE_MIN_INTERVAL_MS = 32
+/** 空闲休眠：指针静止且弹簧收敛后停掉 rAF（此前常驻每帧空转是基线负载来源） */
+const CURSOR_IDLE_STOP_MS = 900
+const CURSOR_SETTLE_SPEED_EPS = 0.05
 const TEXT_BEAM_WIDTH = 2
 const TEXT_BEAM_HEIGHT = 20
 const PRESS_SCALE = 0.82
@@ -282,6 +285,16 @@ export function GlobalSpringCursor({ size = DEFAULT_SIZE }: { size?: number }): 
         state.vy += (rawVy - state.vy) * velSmooth
       }
       paint()
+      // 空闲休眠：无按压、静止超时且弹簧已收敛 → 停排帧（dot 保持最后姿态），
+      // 任意 pointermove/pointerdown 会重新 start()；主线程不再被常驻 rAF 空转
+      if (
+        !pressed &&
+        performance.now() >= idleDeadline &&
+        Math.hypot(state.vx, state.vy) < CURSOR_SETTLE_SPEED_EPS
+      ) {
+        running = false
+        return
+      }
       rafId = requestAnimationFrame(tick)
     }
 
@@ -339,8 +352,11 @@ export function GlobalSpringCursor({ size = DEFAULT_SIZE }: { size?: number }): 
       return 'default'
     }
 
+    let idleDeadline = 0
+
     const onPointerMove = (event: PointerEvent): void => {
       if (event.pointerType === 'touch') return
+      idleDeadline = performance.now() + CURSOR_IDLE_STOP_MS
       state.tx = event.clientX
       state.ty = event.clientY
       const wasSeen = state.seen
@@ -394,8 +410,14 @@ export function GlobalSpringCursor({ size = DEFAULT_SIZE }: { size?: number }): 
 
     const onPointerDown = (event: PointerEvent): void => {
       if (event.pointerType === 'touch') return
+      idleDeadline = performance.now() + CURSOR_IDLE_STOP_MS
       pressed = true
-      if (running) paint()
+      if (!running) {
+        start()
+        paint()
+      } else {
+        paint()
+      }
     }
 
     const onPointerPressEnd = (): void => {
@@ -471,6 +493,8 @@ export function PanelSpringCursor({
         ` rotate(${angle}deg) scale(${1 + stretch}, ${1 - stretch * 0.5})`
     }
 
+    let idleDeadline = 0
+
     const tick = (time: number): void => {
       const dt = Math.min((time - lastTime) / 1000 || 0, MAX_DT)
       lastTime = time
@@ -479,6 +503,15 @@ export function PanelSpringCursor({
       state.x += state.vx * dt
       state.y += state.vy * dt
       paint()
+      // 空闲休眠：静止超时且弹簧收敛 → 停排帧；pointermove 会重新 start()
+      if (
+        performance.now() >= idleDeadline &&
+        Math.hypot(state.vx, state.vy) < CURSOR_SETTLE_SPEED_EPS &&
+        Math.hypot(state.tx - state.x, state.ty - state.y) < 0.5
+      ) {
+        running = false
+        return
+      }
       rafId = requestAnimationFrame(tick)
     }
 
@@ -505,6 +538,7 @@ export function PanelSpringCursor({
     }
     const onPointerMove = (event: PointerEvent): void => {
       if (event.pointerType === 'touch') return
+      idleDeadline = performance.now() + CURSOR_IDLE_STOP_MS
       if (!running) start()
       state.tx = event.clientX
       state.ty = event.clientY

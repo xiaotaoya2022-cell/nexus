@@ -456,6 +456,10 @@ body {
   .nx-fade-in {
     animation: none;
   }
+  .nx-border-beam::before,
+  .nx-border-beam-glow::before {
+    animation: none;
+  }
 }
 
 /* 无边框窗口改由 header 内 JS/IPC 拖动处理，不再使用 -webkit-app-region: drag，
@@ -692,19 +696,9 @@ html.nx-cursor-global-host input::-webkit-search-cancel-button {
   cursor: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNoaGhgBAAEhgGCm2g9SgAAAABJRU5ErkJggg==") 0 0, default !important;
 }
 
-/* ── 4 大高阶动效原语：Spotlight 鼠标聚光灯 / Border Beam 边缘流光 / Scroll Reveal / Marquee ── */
-@property --nx-beam-angle {
-  syntax: '<angle>';
-  initial-value: 0deg;
-  inherits: false;
-}
-
-@keyframes nx-beam-rotate {
-  to {
-    --nx-beam-angle: 360deg;
-  }
-}
-
+/* ── 4 大高阶动效原语：Spotlight 鼠标聚光灯 / Border Beam 边缘流光 / Scroll Reveal / Marquee ──
+   Beam 合成化改造：@property 角度动画不可合成（每帧重绘 conic+blur），
+   改为静态 conic 光带内层 + transform 旋转（GPU 合成），环 mask 裁到边框圈，视觉一致 */
 .nx-border-beam,
 .nx-border-beam-glow {
   position: absolute;
@@ -712,19 +706,40 @@ html.nx-cursor-global-host input::-webkit-search-cancel-button {
   border-radius: inherit;
   padding: 1px;
   pointer-events: none;
+  overflow: hidden;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+}
+
+.nx-border-beam::before,
+.nx-border-beam-glow::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 150vmax;
+  height: 150vmax;
+  transform: translate(-50%, -50%) rotate(0deg);
   background: conic-gradient(
-    from var(--nx-beam-angle),
     transparent 0deg 272deg,
     color-mix(in srgb, var(--nx-beam-from, var(--nx-cobalt)) 40%, transparent) 304deg,
     var(--nx-beam-from, var(--nx-cobalt)) 334deg,
     var(--nx-beam-to, var(--nx-signal)) 354deg,
     transparent 360deg
   );
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  mask-composite: exclude;
-  animation: nx-beam-rotate var(--nx-beam-dur, 5.2s) linear infinite;
+  will-change: transform;
+  animation: nx-beam-spin var(--nx-beam-dur, 5.2s) linear infinite;
+}
+
+@keyframes nx-beam-spin {
+  from {
+    transform: translate(-50%, -50%) rotate(0deg);
+  }
+  to {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
 }
 
 .nx-border-beam {
@@ -953,4 +968,173 @@ html.nx-cursor-global-host input::-webkit-search-cancel-button {
   .style-nexus button:not([data-list-row]):not([data-no-press]):active {
     transform: none !important;
   }
+}
+
+/* ── Porcelain 瓷昼（源自 MEMORA「Porcelain Daylight Bento」设计语言 v0.3.0）
+   明亮冷静 · 瓷白卡片 · 细描边 · 克制柔影 · 深色收束顶栏 · 弹簧物理
+   浅色忠实复刻昼光；深色为同语言夜瓷（slate 反转，强调色提亮） ── */
+.style-porcelain.theme-light {
+  --nx-background: #f1f5f9;
+  --nx-panel: #f1f5f9;
+  --nx-card: #ffffff;
+  --nx-raised: #f8fafc;
+
+  --nx-surface: rgba(15, 23, 42, 0.035);
+  --nx-surface-hover: rgba(15, 23, 42, 0.07);
+  --nx-hover: rgba(15, 23, 42, 0.045);
+  --nx-selected: rgba(37, 99, 235, 0.1);
+
+  --nx-foreground: #0f172a;
+  --nx-foreground-subtle: rgba(71, 85, 105, 0.92);
+  --nx-foreground-subtlest: rgba(100, 116, 139, 0.85);
+  --nx-foreground-inverse: #f8fafc;
+
+  --nx-border: #e2e8f0;
+  --nx-border-hover: #cbd5e1;
+  --nx-hairline: #eef2f7;
+
+  --nx-brand: #2563eb;
+  --nx-primary: #2563eb;
+  --nx-primary-foreground: #ffffff;
+  --nx-secondary: #f1f5f9;
+  --nx-focus-blue: #2563eb;
+
+  --nx-success: #059669;
+  --nx-warning: #b45309;
+  --nx-destructive: #dc2626;
+  --nx-idle: #6d28d9;
+  --nx-success-surface: #ecfdf5;
+  --nx-warning-surface: #fffbeb;
+  --nx-destructive-surface: #fef2f2;
+  --nx-idle-surface: #f5f3ff;
+
+  --nx-chart-1: #2563eb;
+  --nx-chart-2: #10b981;
+  --nx-chart-3: #7c3aed;
+  --nx-chart-4: #ef4444;
+  --nx-chart-5: #f59e0b;
+  --nx-chart-6: #0ea5e9;
+
+  --nx-heat-0: rgba(15, 23, 42, 0.04);
+  --nx-heat-1: color-mix(in oklab, #2563eb 24%, rgba(15, 23, 42, 0.04));
+  --nx-heat-2: color-mix(in oklab, #2563eb 42%, rgba(15, 23, 42, 0.04));
+  --nx-heat-3: color-mix(in oklab, #2563eb 62%, rgba(15, 23, 42, 0.04));
+  --nx-heat-4: color-mix(in oklab, #3b82f6 82%, rgba(15, 23, 42, 0.04));
+
+  --nx-signal: #2563eb;
+  --nx-signal-soft: rgba(37, 99, 235, 0.12);
+  --nx-cobalt: #2563eb;
+
+  --nx-font-ui: 'Segoe UI Variable Text', 'Noto Sans SC', 'Microsoft YaHei UI', 'Segoe UI', system-ui, sans-serif;
+  --nx-font-num: 'Bahnschrift', 'Segoe UI Variable Display', 'Noto Sans SC', 'Microsoft YaHei UI', sans-serif;
+}
+
+/* 夜瓷：同语言的深色面（MEMORA 深顶栏/玻璃层色系外推） */
+.style-porcelain.theme-dark {
+  --nx-background: #0b1120;
+  --nx-panel: #0f172a;
+  --nx-card: #1e293b;
+  --nx-raised: #273449;
+
+  --nx-surface: rgba(241, 245, 249, 0.04);
+  --nx-surface-hover: rgba(241, 245, 249, 0.08);
+  --nx-hover: rgba(241, 245, 249, 0.05);
+  --nx-selected: rgba(59, 130, 246, 0.14);
+
+  --nx-foreground: #f8fafc;
+  --nx-foreground-subtle: rgba(203, 213, 225, 0.85);
+  --nx-foreground-subtlest: rgba(148, 163, 184, 0.8);
+  --nx-foreground-inverse: #0f172a;
+
+  --nx-border: rgba(148, 163, 184, 0.16);
+  --nx-border-hover: rgba(148, 163, 184, 0.26);
+  --nx-hairline: rgba(148, 163, 184, 0.09);
+
+  --nx-brand: #3b82f6;
+  --nx-primary: #3b82f6;
+  --nx-primary-foreground: #ffffff;
+  --nx-secondary: #273449;
+  --nx-focus-blue: #3b82f6;
+
+  --nx-success: #34d399;
+  --nx-warning: #fbbf24;
+  --nx-destructive: #f87171;
+  --nx-idle: #a78bfa;
+  --nx-success-surface: rgba(52, 211, 153, 0.14);
+  --nx-warning-surface: rgba(251, 191, 36, 0.14);
+  --nx-destructive-surface: rgba(248, 113, 113, 0.14);
+  --nx-idle-surface: rgba(167, 139, 250, 0.16);
+
+  --nx-chart-1: #3b82f6;
+  --nx-chart-2: #34d399;
+  --nx-chart-3: #a78bfa;
+  --nx-chart-4: #f87171;
+  --nx-chart-5: #fbbf24;
+  --nx-chart-6: #38bdf8;
+
+  --nx-heat-0: rgba(241, 245, 249, 0.05);
+  --nx-heat-1: color-mix(in oklab, #3b82f6 24%, rgba(241, 245, 249, 0.05));
+  --nx-heat-2: color-mix(in oklab, #3b82f6 42%, rgba(241, 245, 249, 0.05));
+  --nx-heat-3: color-mix(in oklab, #3b82f6 62%, rgba(241, 245, 249, 0.05));
+  --nx-heat-4: color-mix(in oklab, #60a5fa 82%, rgba(241, 245, 249, 0.05));
+
+  --nx-signal: #3b82f6;
+  --nx-signal-soft: rgba(59, 130, 246, 0.16);
+  --nx-cobalt: #3b82f6;
+
+  --nx-font-ui: 'Segoe UI Variable Text', 'Noto Sans SC', 'Microsoft YaHei UI', 'Segoe UI', system-ui, sans-serif;
+  --nx-font-num: 'Bahnschrift', 'Segoe UI Variable Display', 'Noto Sans SC', 'Microsoft YaHei UI', sans-serif;
+}
+
+/* Porcelain 签名材质 */
+/* 深色收束顶栏（昼光签名）：变量域级联，子组件无需逐一改色 */
+.style-porcelain.theme-light header {
+  background: #0f172a;
+  border-bottom-color: #1e293b;
+  --nx-foreground: #f8fafc;
+  --nx-foreground-subtle: rgba(203, 213, 225, 0.85);
+  --nx-foreground-subtlest: rgba(148, 163, 184, 0.9);
+  --nx-foreground-inverse: #0f172a;
+  --nx-border: #1e293b;
+  --nx-border-hover: #334155;
+  --nx-hairline: rgba(148, 163, 184, 0.14);
+  --nx-surface: rgba(248, 250, 252, 0.055);
+  --nx-surface-hover: rgba(248, 250, 252, 0.1);
+  --nx-hover: rgba(248, 250, 252, 0.07);
+  --nx-selected: rgba(59, 130, 246, 0.24);
+  --nx-secondary: #1e293b;
+}
+
+/* 卡片：克制的扩散柔影（浅 0.045 / 深 0.35），hover 描边加深不抬升 */
+.style-porcelain .nx-card-elevated,
+.style-porcelain .nx-kpi-card {
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.045);
+}
+.style-porcelain.theme-dark .nx-card-elevated,
+.style-porcelain.theme-dark .nx-kpi-card {
+  box-shadow: 0 2px 12px rgba(2, 6, 23, 0.35);
+}
+.style-porcelain.theme-light .nx-card-elevated:hover,
+.style-porcelain.theme-light .nx-kpi-card:hover {
+  box-shadow: 0 3px 14px rgba(15, 23, 42, 0.07);
+}
+
+/* 数字仪表字体：Bahnschrift + tabular-nums + 负字距（MEMORA 纪律） */
+.style-porcelain body {
+  font-family: var(--nx-font-ui);
+}
+.style-porcelain .nx-kpi-val {
+  font-family: var(--nx-font-num);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.4px;
+}
+
+/* Tactile Press 弹簧按压（回弹曲线 0.34,1.56,0.64,1） */
+.style-porcelain button:not([data-list-row]):not([data-no-press]) {
+  transition-property: color, background-color, border-color, opacity, box-shadow, transform;
+  transition-duration: 140ms, 140ms, 140ms, 140ms, 140ms, 120ms;
+  transition-timing-function: ease, ease, ease, ease, ease, cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.style-porcelain button:not(:disabled):not([data-list-row]):not([data-no-press]):active {
+  transform: scale(0.97);
 }

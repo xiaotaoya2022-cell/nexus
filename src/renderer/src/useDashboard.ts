@@ -29,6 +29,22 @@ export interface DashboardData {
   sessions: SessionRow[]
 }
 
+/** 看板变化签名：覆盖总量/请求/会话数/模型与 Agent 分布/趋势桶——任一变化即重渲染 */
+function boardSignature(board: BoardData): string {
+  return [
+    board.overview.totals.total,
+    board.overview.totals.requests,
+    board.overview.sessionCount,
+    board.overview.toolCallCount,
+    board.overview.totals.estimatedCostUsd,
+    board.sessions.length,
+    board.byModel.map((m) => m.tokens).join(','),
+    board.byAgent.map((a) => a.tokens).join(','),
+    board.byProject.map((p) => p.tokens).join(','),
+    board.trendByModel.map((p) => p.total).join(',')
+  ].join('|')
+}
+
 export function useDashboard(): {
   data: DashboardData | null
   agents: AgentInfo[]
@@ -51,6 +67,9 @@ export function useDashboard(): {
   const trendRef = useRef<BoardData | null>(null)
   const reloadRef = useRef<() => Promise<void>>(async () => {})
   const reloadSeq = useRef(0)
+  // 看板签名：60s 周期刷新时数据无变化则跳过 setData——data 引用稳定，
+  // 全部图表 useMemo/EChart effect 自动短路（此前每轮 8 图全量重建是主线程长任务主源）
+  const boardSigRef = useRef('')
 
   const reload = useCallback(async (): Promise<void> => {
     // getCalendar 通道保留在 IPC 契约中备用，看板已改用 trend 呈现每日强度（红队 N-16）
@@ -77,18 +96,22 @@ export function useDashboard(): {
       ])
       if (seq !== reloadSeq.current) return // 过期响应丢弃（竞态守卫）
       trendRef.current = board
-      setData({
-        overview: board.overview,
-        trend: trendGroup === 'model' ? board.trendByModel : board.trendByAgent,
-        byAgent: board.byAgent,
-        byModel: board.byModel,
-        byProject: board.byProject,
-        breakdown: board.breakdown,
-        heatmap: board.heatmap,
-        tools: board.tools,
-        sessions: board.sessions
-      })
       setAgents(agentInfos)
+      const sig = boardSignature(board)
+      if (sig !== boardSigRef.current) {
+        boardSigRef.current = sig
+        setData({
+          overview: board.overview,
+          trend: trendGroup === 'model' ? board.trendByModel : board.trendByAgent,
+          byAgent: board.byAgent,
+          byModel: board.byModel,
+          byProject: board.byProject,
+          breakdown: board.breakdown,
+          heatmap: board.heatmap,
+          tools: board.tools,
+          sessions: board.sessions
+        })
+      }
     } finally {
       if (seq === reloadSeq.current) setLoading(false)
     }

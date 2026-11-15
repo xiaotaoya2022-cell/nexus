@@ -69,7 +69,7 @@ import {
   relativeTime,
   shortDir
 } from './lib/format'
-import type { ExportFormat, NamedStat, RangeKey, SessionRow } from '@shared/types'
+import type { ExportFormat, NamedStat, RangeKey, SessionRow, UiStyle } from '@shared/types'
 
 export default function App(): JSX.Element {
   const activeView = useUi((s) => s.activeView)
@@ -113,7 +113,8 @@ export default function App(): JSX.Element {
     void (async () => {
       const s = await nexus.getSettings()
       useUi.getState().setTheme(s.theme)
-      useUi.getState().setUiStyle(s.uiStyle === 'classic' ? 'classic' : 'nexus')
+      // 经典 ZCode 已退役：旧持久化值（classic/未知）迁移到新默认 Porcelain
+      useUi.getState().setUiStyle(s.uiStyle === 'nexus' ? 'nexus' : 'porcelain')
       const r = await nexus.getSavedRange()
       useUi.getState().setRange(r)
       const cr = await nexus.getCustomRange()
@@ -167,7 +168,7 @@ export default function App(): JSX.Element {
     const el = document.documentElement
     el.classList.remove('theme-dark', 'theme-light', 'style-nexus', 'style-classic')
     el.classList.add(theme === 'light' ? 'theme-light' : 'theme-dark')
-    el.classList.add(uiStyle === 'classic' ? 'style-classic' : 'style-nexus')
+    el.classList.add(uiStyle === 'nexus' ? 'style-nexus' : 'style-porcelain')
     setThemeEpoch((v) => v + 1)
   }, [theme, uiStyle])
 
@@ -271,7 +272,7 @@ export default function App(): JSX.Element {
     await nexus.setTheme(next)
   }
 
-  const changeUiStyle = async (next: 'nexus' | 'classic'): Promise<void> => {
+  const changeUiStyle = async (next: UiStyle): Promise<void> => {
     setUiStyle(next)
     await nexus.setUiStyle(next)
   }
@@ -701,8 +702,8 @@ export default function App(): JSX.Element {
               />
               {(
                 [
-                  ['nexus', t('settings.uiStyle.nexus')],
-                  ['classic', t('settings.uiStyle.classic')]
+                  ['porcelain', t('settings.uiStyle.porcelain')],
+                  ['nexus', t('settings.uiStyle.nexus')]
                 ] as const
               ).map(([id, label]) => (
                 <button
@@ -1339,7 +1340,7 @@ export default function App(): JSX.Element {
         theme={theme}
         onToggleTheme={() => void toggleTheme()}
         uiStyle={uiStyle}
-        onToggleUiStyle={() => void changeUiStyle(uiStyle === 'nexus' ? 'classic' : 'nexus')}
+        onToggleUiStyle={() => void changeUiStyle(uiStyle === 'nexus' ? 'porcelain' : 'nexus')}
         lang={getLang()}
         onToggleLang={() => {
           const next: Lang = getLang() === 'zh-CN' ? 'en' : 'zh-CN'

@@ -32,6 +32,7 @@ import { MeshClient } from './modules/mesh/client'
 import { MeshService } from './modules/mesh/service'
 import {
   parseHeadlessMeshArgs,
+  persistPairRequest,
   printHeadlessUsage,
   runHeadlessMeshAgent
 } from './modules/mesh/headless'
@@ -67,6 +68,21 @@ function remigrateCodexIfFlagged(store: NexusStore): void {
   logger.info('migration.codex_remigrated')
 }
 
+/** 图标解析：开发态取 appPath/build；打包态 files 已含 build/icon.ico（asar 内），
+    resourcesPath 兜底；缺失时 warn（曾因静默空图致托盘空白）。 */
+function resolveIconPath(): string {
+  const candidates = [
+    join(app.getAppPath(), 'build/icon.ico'),
+    join(process.resourcesPath ?? '', 'icon.ico'),
+    join(process.resourcesPath ?? '', 'build/icon.ico')
+  ]
+  for (const p of candidates) {
+    if (p && existsSync(p)) return p
+  }
+  logger.warn('icon.missing', { candidates })
+  return candidates[0]
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1600,
@@ -75,7 +91,7 @@ function createWindow(): void {
     minHeight: 680,
     title: 'Nexus',
     // 应用图标：任务栏/Alt+Tab（安装包图标由 electron-builder 从 build/icon.ico 取）
-    icon: join(app.getAppPath(), 'build/icon.ico'),
+    icon: resolveIconPath(),
     backgroundColor:
       process.env.NEXUS_CAPTURE && process.env.NEXUS_CAPTURE_STYLE === 'classic'
         ? nativeTheme.shouldUseDarkColors
@@ -214,6 +230,11 @@ app.whenReady()
       if (help) {
         printHeadlessUsage()
       } else {
+        // --pair 只落盘到固定信箱（污点终结），网络连接由运行器从盘上配置发起
+        if (options.pairUri) {
+          persistPairRequest(options.pairUri, options.alias)
+          options.pairUri = undefined
+        }
         await runHeadlessMeshAgent(options)
       }
       powerSaveBlocker.stop(blocker)
@@ -474,8 +495,10 @@ app.whenReady()
 
   if (!process.env.NEXUS_CAPTURE) {
     try {
-      const iconPath = join(app.getAppPath(), 'build/icon.ico')
-      const iconImg = existsSync(iconPath) ? nativeImage.createFromPath(iconPath) : nativeImage.createEmpty()
+      const iconPath = resolveIconPath()
+      const iconImg = existsSync(iconPath)
+        ? nativeImage.createFromPath(iconPath)
+        : nativeImage.createEmpty()
       tray = new Tray(iconImg)
       tray.on('click', () => {
         if (!mainWindow) {

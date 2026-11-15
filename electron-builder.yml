@@ -8,6 +8,9 @@ electronDist: node_modules/electron/dist
 files:
   - out/**
   - package.json
+  # 托盘/窗口图标随包发布（生产 appPath=asar 内无 build/ 曾致托盘空白）
+  - build/icon.ico
+  - build/icon.png
 win:
   target:
     - target: nsis

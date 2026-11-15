@@ -3,6 +3,7 @@
 
 import WebSocket from 'ws'
 import { createHash, randomBytes } from 'node:crypto'
+import * as nodeFs from 'node:fs'
 import os from 'node:os'
 import type { NexusStore } from '@main/modules/aggregator/infrastructure/store'
 import type { SystemCollector } from '@main/modules/system/collector'
@@ -37,6 +38,121 @@ export interface PairHubInput {
   pin?: string
   nonce?: string
   pairingSecret?: string
+}
+
+/** Mesh 仅允许私网/局域网目标（产品边界：VMware NAT / WSL2 / LAN / Tailscale / localhost）。
+    阻断把公网地址注入 pair 串触发的 SSRF（Mimosa L3 拦截项）。 */
+const MESH_PRIVATE_TLD_RE = /\.(local|lan|internal|home|arpa)$/i
+const MESH_PRIVATE_IPV6_RE = /^(::1|\[::1\]|f[cd][0-9a-f]{2}:|fe80:)/i
+
+function isPrivateIpv4(host: string): boolean {
+  const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
+  if (!m) return false
+  const [a, b] = [Number(m[1]), Number(m[2])]
+  if (m.some((part) => Number(part) > 255)) return false
+  if (a === 127 || a === 10) return true // loopback / 私有 A 类
+  if (a === 192 && b === 168) return true
+  if (a === 172 && b >= 16 && b <= 31) return true
+  if (a === 100 && b >= 64 && b <= 127) return true // Tailscale CGNAT
+  if (a === 169 && b === 254) return true // link-local
+  return false
+}
+
+export function assertPrivateMeshHost(rawHost: string): void {
+  const host = rawHost.trim().replace(/^\[|\]$/g, '').toLowerCase()
+  if (
+    host === 'localhost' ||
+    host.endsWith('.localhost') ||
+    MESH_PRIVATE_TLD_RE.test(host) ||
+    !host.includes('.') // 单标签主机名（LAN NetBIOS/mDNS 短名）
+  ) {
+    return
+  }
+  if (isPrivateIpv4(host)) return
+  if (MESH_PRIVATE_IPV6_RE.test(host)) return // IPv6 loopback / ULA fc00::/7 / link-local
+  throw new Error(`Mesh 仅允许私网/局域网地址（LAN/Tailscale/localhost），已拒绝：${rawHost}`)
+}
+
+/** 主机字符白名单：sink 只允许接收经捕获组重建的字符串（污点在捕获处终结，静态可证）。 */
+const MESH_HOST_SAFE_RE = /^([A-Za-z0-9._-]{1,253})$/
+const MESH_HUB_URL_RE = /^ws:\/\/([A-Za-z0-9._-]{1,253}):(\d{1,5})$/
+
+/** 白名单捕获 → 干净主机名。非法字符直接抛错。 */
+function captureSafeHost(rawHost: string): string {
+  const m = rawHost.trim().match(MESH_HOST_SAFE_RE)
+  if (!m) throw new Error('Hub 主机格式非法（仅允许字母/数字/点/连字符/下划线）')
+  assertPrivateMeshHost(m[1])
+  return m[1]
+}
+
+/** 白名单捕获 → 干净 ws:// URL（host 与端口均来自受限捕获/数字校验）。 */
+function captureSafeHubUrl(rawUrl: string): string {
+  const m = rawUrl.trim().match(MESH_HUB_URL_RE)
+  if (!m) throw new Error('Hub URL 格式非法')
+  assertPrivateMeshHost(m[1])
+  const port = Number(m[2])
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    throw new Error('Hub 端口非法')
+  }
+  return `ws://${m[1]}:${port}`
+}
+
+export interface ValidatedPairRequest {
+  host: string
+  port: number
+  nonce: string
+  pairingSecret: string
+  pin: string
+}
+
+/** 配对请求校验：解析 nexus-pair:// → 白名单捕获主机 → 私网断言。输出仅含受限捕获/数字。 */
+export function validatePairUriForMesh(rawUri: string): ValidatedPairRequest {
+  const params = parsePairUri(rawUri)
+  const host = captureSafeHost(params.host)
+  const port = params.port
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    throw new Error('配对串端口非法')
+  }
+  if (!params.nonce || !params.pairingSecret || !/^\d{6}$/.test(params.pin)) {
+    throw new Error('配对参数不完整，请直接粘贴 nexus-pair:// 完整配对串')
+  }
+  return { host, port, nonce: params.nonce, pairingSecret: params.pairingSecret, pin: params.pin }
+}
+
+/** 从盘上待配对文件发起配对（网络调用与命令行输入隔文件边界）。文件缺失/损坏返回 false。 */
+export async function pairFromPendingPairFile(
+  client: MeshClient,
+  pendingPairFile: string
+): Promise<boolean> {
+  const { existsSync, readFileSync } = nodeFs
+  if (!existsSync(pendingPairFile)) return false
+  let req: ValidatedPairRequest | null = null
+  try {
+    const j = JSON.parse(readFileSync(pendingPairFile, 'utf8')) as Partial<ValidatedPairRequest>
+    if (
+      typeof j.host !== 'string' ||
+      typeof j.port !== 'number' ||
+      !Number.isInteger(j.port) ||
+      typeof j.nonce !== 'string' ||
+      typeof j.pairingSecret !== 'string' ||
+      typeof j.pin !== 'string'
+    ) {
+      return false
+    }
+    req = { host: j.host, port: j.port, nonce: j.nonce, pairingSecret: j.pairingSecret, pin: j.pin }
+  } catch {
+    return false
+  }
+  // sink 前白名单重建（host 经捕获组，port 经数字校验）+ 私网断言
+  const host = captureSafeHost(req.host)
+  await client.pairWithHub({
+    host,
+    port: req.port,
+    nonce: req.nonce,
+    pairingSecret: req.pairingSecret,
+    pin: req.pin
+  })
+  return true
 }
 
 interface PendingReq {
@@ -174,6 +290,7 @@ export class MeshClient {
     if (!params.nonce || !params.pairingSecret || !/^\d{6}$/.test(params.pin)) {
       throw new Error('配对参数不完整，请直接粘贴 nexus-pair:// 完整配对串')
     }
+    assertPrivateMeshHost(params.host)
 
     this.clearTimers()
     this.stopped = false
@@ -187,7 +304,7 @@ export class MeshClient {
     }
     this.connected = false
 
-    const hubUrl = `ws://${params.host}:${params.port}`
+    const hubUrl = `ws://${captureSafeHost(params.host)}:${params.port}`
     const ws = await this.openSocket(hubUrl)
     this.attachSocket(ws, false)
 
@@ -227,7 +344,8 @@ export class MeshClient {
 
     let activeWs: WebSocket | null = null
     try {
-      const ws = await this.openSocket(cfg.hubUrl)
+      // 存量配置同样受私网约束（防配置被篡改后指向公网）；白名单捕获重建 URL 断污点
+      const ws = await this.openSocket(captureSafeHubUrl(cfg.hubUrl))
       if (this.stopped) {
         ws.close()
         return
@@ -422,7 +540,9 @@ export class MeshClient {
     }
   }
 
-  private openSocket(url: string): Promise<WebSocket> {
+  private openSocket(rawUrl: string): Promise<WebSocket> {
+    // Sink 前置校验（白名单捕获重建，双保险）：仅允许 ws:// 指向私网
+    const url = captureSafeHubUrl(rawUrl)
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(url)
       const timer = setTimeout(() => {
