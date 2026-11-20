@@ -1,0 +1,84 @@
+/* SurePoint Adaptive Presentation Stylesheet (Zero-Dependency) */
+
+.sp-cursor {
+  --sp-ink: #0f172a;
+  --sp-fill: rgba(15, 23, 42, 0.88);
+  --sp-halo: rgba(255, 255, 255, 0.45);
+  --sp-ring: color-mix(in srgb, #0f172a 72%, var(--sp-accent, #2563eb));
+  pointer-events: none;
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 9999;
+  border-radius: 9999px;
+  border: 0 solid var(--sp-ink);
+  background: var(--sp-fill);
+  box-shadow: 0 0 0 1.25px var(--sp-halo);
+  will-change: transform;
+  transition:
+    width 150ms ease-out,
+    height 150ms ease-out,
+    border-radius 150ms ease-out,
+    border-width 150ms ease-out,
+    background-color 120ms ease-out,
+    border-color 120ms ease-out,
+    box-shadow 120ms ease-out;
+}
+
+.sp-cursor[data-tone='light'] {
+  --sp-ink: #f8fafc;
+  --sp-fill: rgba(248, 250, 252, 0.92);
+  --sp-halo: rgba(15, 23, 42, 0.52);
+  --sp-ring: color-mix(in srgb, #f8fafc 76%, var(--sp-accent, #60a5fa));
+}
+
+.sp-cursor.sp-interactive {
+  background: transparent;
+  border-color: var(--sp-ring);
+  box-shadow:
+    0 0 0 1px var(--sp-halo),
+    inset 0 0 0 1px var(--sp-halo);
+}
+
+.sp-cursor.sp-text {
+  background: var(--sp-ink);
+  box-shadow: 0 0 0 1px var(--sp-halo);
+}
+
+.sp-cursor.sp-text::before,
+.sp-cursor.sp-text::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  width: 7px;
+  height: 1.5px;
+  background: var(--sp-ink);
+  box-shadow: 0 0 0 0.75px var(--sp-halo);
+  transform: translateX(-50%);
+}
+
+.sp-cursor.sp-text::before {
+  top: -2.5px;
+}
+
+.sp-cursor.sp-text::after {
+  bottom: -2.5px;
+}
+
+/* 1x1 alpha=1 PNG cursor prevents remote-desktop tools from misdetecting FPS mouse lock */
+.sp-cursor-host,
+.sp-cursor-host *,
+.sp-cursor-host *::before,
+.sp-cursor-host *::after,
+html.sp-cursor-global-host,
+html.sp-cursor-global-host *,
+html.sp-cursor-global-host *::before,
+html.sp-cursor-global-host *::after {
+  cursor: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNoaGhgBAAEhgGCm2g9SgAAAABJRU5ErkJggg==") 0 0, default !important;
+}
+
+@media (prefers-reduced-motion: reduce), (pointer: coarse) {
+  .sp-cursor {
+    display: none !important;
+  }
+}

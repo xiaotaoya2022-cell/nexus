@@ -1,0 +1,28 @@
+{
+  "name": "surepoint",
+  "version": "0.1.0",
+  "description": "Production-ready, zero-dependency adaptive pointer system with Adaptive Presentation for real desktop & web apps.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "keywords": [
+    "cursor",
+    "custom-cursor",
+    "adaptive-pointer",
+    "adaptive-presentation",
+    "spring-physics",
+    "zero-dependency",
+    "electron",
+    "react",
+    "typescript"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "react-dom": ">=18.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": { "optional": true },
+    "react-dom": { "optional": true }
+  }
+}

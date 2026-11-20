@@ -22,6 +22,7 @@ import {
   writeCursorSize,
   type CursorSizeOption
 } from '../lib/cursorConfig'
+import { resolveAdaptiveTone, type CursorInkTone } from '../lib/surepointAdaptive'
 import { useUi } from '../store'
 
 export type GlobalCursorMode = 'default' | 'interactive' | 'text'
@@ -223,6 +224,7 @@ export function GlobalSpringCursor({ size = DEFAULT_SIZE }: { size?: number }): 
     let lastTime = 0
     let deferred = false
     let mode: GlobalCursorMode = 'default'
+    let tone: CursorInkTone = root.classList.contains('theme-dark') ? 'light' : 'dark'
     let pressed = false
     let jumpCount = 0
     let lastJumpAt = 0
@@ -241,6 +243,13 @@ export function GlobalSpringCursor({ size = DEFAULT_SIZE }: { size?: number }): 
     // 预解码极微透明 1×1 PNG 光标，确保首帧即命中缓存而不触发 SetCursor(NULL)
     const preload = new Image()
     preload.src = HIDDEN_CURSOR_DATA_URI
+
+    const applyTone = (next: CursorInkTone): void => {
+      if (next === tone) return
+      tone = next
+      dot.dataset.tone = next
+    }
+    dot.dataset.tone = tone
 
     const applyMode = (next: GlobalCursorMode): void => {
       if (next === mode) return
@@ -299,6 +308,7 @@ export function GlobalSpringCursor({ size = DEFAULT_SIZE }: { size?: number }): 
         state.y = state.ty
         state.vx = 0
         state.vy = 0
+        applyTone(resolveAdaptiveTone(state.tx, state.ty, tone))
         paint()
       }
     }
@@ -434,9 +444,10 @@ export function GlobalSpringCursor({ size = DEFAULT_SIZE }: { size?: number }): 
       const wasSeen = state.seen
       const target = event.target
       deferred = target instanceof Element && target.closest('[data-nx-panel-cursor]') !== null
-      if (!deferred && event.timeStamp - lastSampleAt >= SAMPLE_MIN_INTERVAL_MS) {
+      if (!deferred && (!wasSeen || event.timeStamp - lastSampleAt >= SAMPLE_MIN_INTERVAL_MS)) {
         lastSampleAt = event.timeStamp
         applyMode(sampleCursorModeAt(state.tx, state.ty))
+        applyTone(resolveAdaptiveTone(state.tx, state.ty, tone))
       }
       if (!state.seen) {
         state.x = state.tx
@@ -551,8 +562,17 @@ export function PanelSpringCursor({
     let rafId = 0
     let running = false
     let lastTime = 0
+    let lastSampleAt = 0
     let idleDeadline = 0
+    let tone: CursorInkTone = document.documentElement.classList.contains('theme-dark') ? 'light' : 'dark'
+    dot.dataset.tone = tone
     const state = { x: 0, y: 0, vx: 0, vy: 0, tx: 0, ty: 0, seen: false }
+
+    const applyTone = (next: CursorInkTone): void => {
+      if (next === tone) return
+      tone = next
+      dot.dataset.tone = next
+    }
 
     const paint = (): void => {
       const speed = Math.hypot(state.vx, state.vy)
@@ -603,6 +623,7 @@ export function PanelSpringCursor({
 
     const onPointerEnter = (event: PointerEvent): void => {
       if (event.pointerType === 'touch') return
+      applyTone(resolveAdaptiveTone(event.clientX, event.clientY, tone))
       start()
     }
     const onPointerMove = (event: PointerEvent): void => {
@@ -611,6 +632,10 @@ export function PanelSpringCursor({
       if (!running) start()
       state.tx = event.clientX
       state.ty = event.clientY
+      if (!state.seen || event.timeStamp - lastSampleAt >= SAMPLE_MIN_INTERVAL_MS) {
+        lastSampleAt = event.timeStamp
+        applyTone(resolveAdaptiveTone(state.tx, state.ty, tone))
+      }
       if (!state.seen) {
         state.x = state.tx
         state.y = state.ty

@@ -626,36 +626,50 @@ body {
     inset 0 1px 0 rgba(255, 255, 255, 0.65);
 }
 
-/* ── 自定义弹簧鼠标光标（移植自 ApiSpace，六态接管 + 局部预览）── */
+/* ── SurePoint 自定义弹簧鼠标光标（自适应表现：热点亮度采样 + 双色护盾 + 六态状态机）── */
 .nx-cursor {
+  --nx-cursor-ink: #0f172a;
+  --nx-cursor-fill: rgba(15, 23, 42, 0.88);
+  --nx-cursor-halo: rgba(255, 255, 255, 0.45);
+  --nx-cursor-ring: color-mix(in srgb, #0f172a 72%, var(--nx-signal));
   pointer-events: none;
   position: fixed;
   left: 0;
   top: 0;
   z-index: 9999;
   border-radius: 9999px;
-  border: 0 solid var(--nx-foreground);
-  background: color-mix(in srgb, var(--nx-foreground) 84%, transparent);
+  border: 0 solid var(--nx-cursor-ink);
+  background: var(--nx-cursor-fill);
+  box-shadow: 0 0 0 1.25px var(--nx-cursor-halo);
   will-change: transform;
   transition:
     width 150ms ease-out,
     height 150ms ease-out,
     border-radius 150ms ease-out,
     border-width 150ms ease-out,
-    background-color 150ms ease-out;
+    background-color 120ms ease-out,
+    border-color 120ms ease-out,
+    box-shadow 120ms ease-out;
+}
+
+.nx-cursor[data-tone='light'] {
+  --nx-cursor-ink: #f8fafc;
+  --nx-cursor-fill: rgba(248, 250, 252, 0.92);
+  --nx-cursor-halo: rgba(15, 23, 42, 0.52);
+  --nx-cursor-ring: color-mix(in srgb, #f8fafc 76%, var(--nx-signal));
 }
 
 .nx-cursor.nx-interactive {
   background: transparent;
-  border-color: var(--nx-foreground);
-}
-
-.style-nexus .nx-cursor.nx-interactive {
-  border-color: color-mix(in srgb, var(--nx-foreground) 72%, var(--nx-signal));
+  border-color: var(--nx-cursor-ring);
+  box-shadow:
+    0 0 0 1px var(--nx-cursor-halo),
+    inset 0 0 0 1px var(--nx-cursor-halo);
 }
 
 .nx-cursor.nx-text {
-  background: var(--nx-foreground);
+  background: var(--nx-cursor-ink);
+  box-shadow: 0 0 0 1px var(--nx-cursor-halo);
 }
 
 .nx-cursor.nx-text::before,
@@ -665,7 +679,8 @@ body {
   left: 50%;
   width: 7px;
   height: 1.5px;
-  background: var(--nx-foreground);
+  background: var(--nx-cursor-ink);
+  box-shadow: 0 0 0 0.75px var(--nx-cursor-halo);
   transform: translateX(-50%);
 }
 
@@ -1207,10 +1222,7 @@ html.nx-cursor-global-host input::-webkit-search-cancel-button {
   box-shadow: 0 1px 2px rgba(2, 6, 23, 0.4);
 }
 
-/* 光标交互环染色（与信号色一致） */
-.style-porcelain .nx-cursor.nx-interactive {
-  border-color: color-mix(in srgb, var(--nx-foreground) 64%, var(--nx-signal));
-}
+/* 光标交互环染色由 SurePoint 自适应极性变量 --nx-cursor-ring 统一接管 */
 
 /* Tactile Press 弹簧按压（回弹曲线与 Nexus Studio 同族） */
 .style-porcelain button:not([data-list-row]):not([data-no-press]) {

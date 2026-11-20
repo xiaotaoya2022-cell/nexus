@@ -5,6 +5,9 @@
   <p><em>万千 Token，汇于一处；每一次消耗，皆有记录。</em><br/>
   <sub>EVERY TOKEN FINDS ITS RECORD. ｜ 品牌理念：聚合 · 计量 · 留存 · 追溯</sub></p>
   <p>
+    <strong>简体中文</strong> ｜ <a href="README_EN.md">English</a>
+  </p>
+  <p>
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license"/>
     <img src="https://img.shields.io/badge/version-v0.2.47-blue" alt="version"/>
     <img src="https://img.shields.io/badge/platform-Windows-lightgrey" alt="platform"/>
